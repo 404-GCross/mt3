@@ -76,9 +76,4 @@ jobs:
           context: .
           file: Dockerfile
           tags: mt3-transcriber:test-${{ github.sha }}
-          outputs: type=docker,dest=/tmp/mt3-transcriber.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mt3-transcriber-docker-${{ github.sha }}
-          path: /tmp/mt3-transcriber.tar
-          retention-days: 7
+          push: false
