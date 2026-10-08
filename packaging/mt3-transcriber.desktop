@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=MT3 Transcriber
+Comment=AI music transcription to MIDI
+Exec=mt3-transcriber
+Icon=mt3-transcriber
+Terminal=false
+Categories=AudioVideo;Audio;Music;

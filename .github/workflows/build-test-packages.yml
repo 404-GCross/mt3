@@ -1,0 +1,84 @@
+name: Build test packages
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: Static checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile Python and validate shell scripts
+        run: |
+          python -m py_compile gui/*.py
+          python -m compileall -q mt3
+          bash -n gui/*.sh packaging/*.sh
+
+  build-deb:
+    name: Build Debian package
+    needs: checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev fakeroot python3-tk
+      - name: Build package
+        run: VERSION=0.0.0-dev ./packaging/build-deb.sh
+      - name: Inspect package
+        run: dpkg-deb --info dist/*.deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-transcriber-deb-${{ github.sha }}
+          path: dist/*.deb
+          retention-days: 14
+
+  build-rpm:
+    name: Build RPM package
+    needs: checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+      - name: Build package
+        run: VERSION=0.0.0-dev ./packaging/build-rpm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-transcriber-rpm-${{ github.sha }}
+          path: dist/*.rpm
+          retention-days: 14
+
+  build-docker:
+    name: Build Docker image
+    needs: checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: mt3-transcriber:test-${{ github.sha }}
+          outputs: type=docker,dest=/tmp/mt3-transcriber.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-transcriber-docker-${{ github.sha }}
+          path: /tmp/mt3-transcriber.tar
+          retention-days: 7

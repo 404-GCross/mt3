@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.venv-mt3gui/
+checkpoints/
+.pytest_cache/
+dist/
+.package/
+.rpmbuild/
