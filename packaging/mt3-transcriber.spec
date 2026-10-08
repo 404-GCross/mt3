@@ -5,6 +5,7 @@ Summary: MT3 music transcription desktop application
 License: Apache-2.0
 BuildArch: x86_64
 Requires: python3 >= 3.12, python3-tkinter, python3-venv, libsndfile, git
+Source0: mt3-transcriber.tar.gz
 
 %description
 Audio to MIDI transcription with MT3 piano and multi-instrument models.
