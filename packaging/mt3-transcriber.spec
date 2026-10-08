@@ -10,14 +10,13 @@ Requires: python3 >= 3.12, python3-tkinter, python3-virtualenv, libsndfile, git
 Audio to MIDI transcription with MT3 piano and multi-instrument models.
 
 %prep
-mkdir -p %{_builddir}/mt3-transcriber
-cp -a %{_topdir}/SOURCES/mt3-transcriber/* %{_builddir}/mt3-transcriber/
+%setup -q -n mt3-transcriber
 
 %install
+rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_prefix}/share/mt3-transcriber
 mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications
-cp -a %{_builddir}/mt3-transcriber/mt3 %{_builddir}/mt3-transcriber/gui \
-  %{_builddir}/mt3-transcriber/packaging %{buildroot}%{_prefix}/share/mt3-transcriber/
+cp -a mt3 gui packaging %{buildroot}%{_prefix}/share/mt3-transcriber/
 cat > %{buildroot}%{_bindir}/mt3-transcriber <<'EOF'
 #!/usr/bin/env bash
 exec /usr/share/mt3-transcriber/gui/run.sh "$@"
