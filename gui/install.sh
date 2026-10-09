@@ -49,13 +49,10 @@ fetch() {  # fetch URL DEST
 
 # ---------------------------------------------------------------- 系统依赖
 # 只补真正缺失的运行时；Python 由 uv 提供，不依赖系统 Python 版本。
+# MT3_SKIP_SYSDEPS=1 可完全跳过系统包检查（依赖已自行装好时使用）。
 missing=()
 command -v git >/dev/null 2>&1 || missing+=(git)
 have_dl || missing+=(curl)
-missing_sndfile=0
-if command -v ldconfig >/dev/null 2>&1 && ! ldconfig -p 2>/dev/null | grep -q libsndfile; then
-  missing_sndfile=1
-fi
 
 pkg_name() {
   case "$1" in
@@ -72,10 +69,9 @@ pkg_name() {
   esac
 }
 
-if [ "${#missing[@]}" -gt 0 ] || [ "$missing_sndfile" = 1 ]; then
+if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && [ "${#missing[@]}" -gt 0 ]; then
   pkgs=()
   for item in "${missing[@]}"; do pkgs+=("$(pkg_name "$item")"); done
-  [ "$missing_sndfile" = 1 ] && pkgs+=("$(pkg_name libsndfile)")
   warn "缺少系统包: ${pkgs[*]}"
   pm=""
   for candidate in apt-get dnf pacman zypper; do
@@ -102,8 +98,20 @@ if [ "${#missing[@]}" -gt 0 ] || [ "$missing_sndfile" = 1 ]; then
   fi
 fi
 
+# libsndfile 可选：pip 的 soundfile wheel 一般自带该库，缺失只提示不阻断。
+# 注意不要用 `ldconfig -p | grep -q`：在 set -o pipefail 下 grep 提前退出会让
+# ldconfig 收到 SIGPIPE 而整条管道判为失败，导致已安装也被误报。
+if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && command -v ldconfig >/dev/null 2>&1; then
+  ldconfig_out="$(ldconfig -p 2>/dev/null || true)"
+  case "$ldconfig_out" in
+    *libsndfile*) : ;;
+    *) warn "未检测到系统 libsndfile（pip 的 soundfile 通常自带，可忽略）。" ;;
+  esac
+fi
+
 if command -v nvidia-smi >/dev/null 2>&1; then
-  log "检测到 GPU: $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)"
+  gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
+  log "检测到 GPU: ${gpu_name:-未知}"
 else
   warn "未检测到 nvidia-smi；若使用 GPU 请先装好 NVIDIA 驱动，否则会退回 CPU。"
 fi
@@ -123,7 +131,7 @@ if [ ! -x "$UV" ]; then
   trap 'rm -rf "$tmp"' EXIT
   fetch "https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz" "$tmp/uv.tar.gz"
   tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
-  found="$(find "$tmp" -type f -name uv | head -1)"
+  found="$(find "$tmp" -type f -name uv | head -1 || true)"
   [ -n "$found" ] || die "uv 解压失败"
   cp "$found" "$UV_BIN"
   chmod 755 "$UV_BIN"
