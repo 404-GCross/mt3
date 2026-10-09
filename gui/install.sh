@@ -109,6 +109,23 @@ if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && command -v ldconfig >/dev/null 2>&1; t
   esac
 fi
 
+# 中文字体：uv 自带的 Tk 需要系统里存在一款 CJK 字体，否则界面中文显示为空白。
+if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && command -v fc-list >/dev/null 2>&1; then
+  cjk_fonts="$(fc-list :lang=zh 2>/dev/null || true)"
+  if [ -z "$cjk_fonts" ]; then
+    warn "未检测到中文字体，图形界面里的中文可能显示为空白。请安装其一："
+    if command -v dnf >/dev/null 2>&1; then
+      warn "  sudo dnf install google-noto-sans-cjk-fonts"
+    elif command -v pacman >/dev/null 2>&1; then
+      warn "  sudo pacman -S noto-fonts-cjk"
+    elif command -v zypper >/dev/null 2>&1; then
+      warn "  sudo zypper install noto-sans-cjk-fonts"
+    else
+      warn "  sudo apt install fonts-noto-cjk"
+    fi
+  fi
+fi
+
 if command -v nvidia-smi >/dev/null 2>&1; then
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
   log "检测到 GPU: ${gpu_name:-未知}"

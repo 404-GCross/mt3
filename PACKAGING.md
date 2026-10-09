@@ -64,6 +64,21 @@ mt3-transcriber
 
 依赖仅为 `git`、`curl`、`libsndfile`（Python 由 uv 自带）。
 
+## 中文字体（GUI 显示空白时）
+
+uv 自带的 Tk 不会自动回退到中文字体，若系统里没有 CJK 字体，界面中文会显示为
+空白（只剩 ASCII 和 `/`、`:` 等）。程序会自动挑选一款已安装的中文字体；若一款都没
+有，会弹窗提示安装：
+
+```bash
+sudo dnf install google-noto-sans-cjk-fonts      # Fedora
+sudo apt install fonts-noto-cjk                  # Debian/Ubuntu
+sudo pacman -S noto-fonts-cjk                    # Arch
+sudo zypper install noto-sans-cjk-fonts          # openSUSE
+```
+
+也可用 `MT3_UI_FONT="Noto Sans CJK SC"` 手动指定字体族。
+
 ## 构建 AppImage（独立、双击即用）
 
 AppImage 内置 Python 3.12 + 程序 + CPU 依赖，**不需要系统 Python、看不到终端**；

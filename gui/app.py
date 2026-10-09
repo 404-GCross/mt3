@@ -139,6 +139,59 @@ def ensure_supported_interpreter():
              [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
+# 常见的中文字体族，按优先级排列；不同发行版包名/字体名略有差异。
+CJK_FONT_CANDIDATES = (
+    'Noto Sans CJK SC', 'Noto Sans CJK', 'Noto Sans SC',
+    'Source Han Sans SC', 'Source Han Sans CN',
+    'WenQuanYi Zen Hei', 'WenQuanYi Micro Hei', 'WQY Zen Hei',
+    'Sarasa Gothic SC', 'Sarasa Term SC',
+    'Droid Sans Fallback', 'AR PL UMing CN', 'AR PL UKai CN',
+    'Microsoft YaHei', 'PingFang SC', 'Heiti SC', 'SimHei',
+)
+
+
+def configure_cjk_fonts(root):
+  """Point Tk's default fonts at an installed CJK family.
+
+  The Tk bundled with the standalone Python does not always fall back to a
+  CJK font, which leaves Chinese labels blank (only ASCII and ``/`` visible).
+  Returns the chosen family, or None when no CJK font is installed.
+  """
+  import tkinter.font as tkfont
+
+  families = set(tkfont.families(root))
+  override = os.environ.get('MT3_UI_FONT')
+  if override:
+    chosen = override
+  else:
+    chosen = next((name for name in CJK_FONT_CANDIDATES if name in families), None)
+    if chosen is None:
+      for name in sorted(families):
+        lowered = name.lower()
+        if any(key in lowered for key in
+               ('cjk', 'wenquanyi', 'wqy', 'sarasa', 'source han',
+                'noto sans sc', 'yahei', 'heiti')):
+          chosen = name
+          break
+  if chosen is None:
+    return None
+
+  for name in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont',
+               'TkCaptionFont', 'TkSmallCaptionFont', 'TkIconFont',
+               'TkTooltipFont'):
+    try:
+      tkfont.nametofont(name).configure(family=chosen)
+    except tk.TclError:
+      pass
+  # 让 ttk 控件也跟随 TkDefaultFont（部分主题会自带固定字体）。
+  try:
+    import tkinter.ttk as ttk
+    ttk.Style(root).configure('.', font='TkDefaultFont')
+  except tk.TclError:
+    pass
+  return chosen
+
+
 class Mt3App:
   """Tkinter desktop UI."""
 
@@ -159,6 +212,7 @@ class Mt3App:
 
     root = tk.Tk()
     self.root = root
+    self.cjk_font = configure_cjk_fonts(root)
     root.title('MT3 扒谱工具')
     root.minsize(640, 460)
 
@@ -259,11 +313,26 @@ class Mt3App:
     if missing_checkpoints(self.checkpoint_dir):
       self.log('尚未下载模型权重，可点击“下载/刷新模型”联网获取（约 340MB）。')
     self.log(f'模型权重目录: {CHECKPOINT_DIR}')
+    self.log('界面字体: ' + (self.cjk_font or '(未找到中文字体)'))
+    if self.cjk_font is None:
+      self.root.after(300, self.warn_missing_cjk_font)
 
     self.root.after(100, self.poll_queue)
     self.root.after(400, self.prompt_download_if_needed)
 
   # ------------------------------------------------------------------ UI 事件
+
+  def warn_missing_cjk_font(self):
+    """Tell the user to install a CJK font when Chinese text stays blank."""
+    self.messagebox.showwarning(
+        '缺少中文字体 / Missing CJK font',
+        '未找到可用的中文字体，界面里中文可能显示为空白。\n\n'
+        '请安装任一中文字体后重新打开：\n'
+        '  Fedora:  sudo dnf install google-noto-sans-cjk-fonts\n'
+        '  Debian:  sudo apt install fonts-noto-cjk\n'
+        '  Arch:    sudo pacman -S noto-fonts-cjk\n'
+        '  openSUSE: sudo zypper install noto-sans-cjk-fonts\n\n'
+        'No CJK font found; Chinese labels may be blank.')
 
   def refresh_model_status(self):
     missing = missing_checkpoints(Path(self.checkpoint_var.get()))
