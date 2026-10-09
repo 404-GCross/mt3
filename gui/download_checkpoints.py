@@ -111,7 +111,7 @@ def human_bytes(num):
   for unit in ('B', 'KB', 'MB', 'GB'):
     if num < 1024 or unit == 'GB':
       return f'{num:.1f} {unit}' if unit != 'B' else f'{int(num)} B'
-      num /= 1024
+    num /= 1024
 
 
 def download_models(dest, models, progress=None):

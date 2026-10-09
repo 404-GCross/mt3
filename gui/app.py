@@ -97,6 +97,48 @@ def missing_checkpoints(directory=CHECKPOINT_DIR):
   return missing
 
 
+def _venv_python_candidates():
+  """Interpreters used by run.sh / install.sh, in priority order."""
+  candidates = []
+  env_dir = os.environ.get('MT3_VENV_DIR')
+  if env_dir:
+    candidates.append(Path(env_dir) / 'bin' / 'python')
+  candidates.append(Path.home() / '.local/share/mt3-transcriber/venv/bin/python')
+  candidates.append(REPO_ROOT / '.venv-mt3gui/bin/python')
+  return candidates
+
+
+def ensure_supported_interpreter():
+  """Hand over to the private virtualenv when this Python lacks MT3 deps.
+
+  Desktop launchers already use the virtualenv, but a user (or file manager)
+  may start ``app.py`` with the system Python, which has Tkinter but not
+  TensorFlow/JAX.  In that case restart inside the prepared virtualenv instead
+  of failing later with a confusing ``ModuleNotFoundError``.
+  """
+  if os.environ.get('MT3_BOOTSTRAPPED') == '1':
+    return
+  import importlib.util
+
+  if (importlib.util.find_spec('tensorflow') is not None
+      and importlib.util.find_spec('jax') is not None):
+    return
+
+  current = Path(sys.executable).resolve()
+  for candidate in _venv_python_candidates():
+    if not candidate.exists():
+      continue
+    try:
+      if candidate.resolve() == current:
+        continue
+    except OSError:
+      continue
+    os.environ['MT3_BOOTSTRAPPED'] = '1'
+    print(f'[mt3] 使用虚拟环境解释器: {candidate}', file=sys.stderr)
+    os.execv(str(candidate),
+             [str(candidate), str(Path(__file__).resolve()), *sys.argv[1:]])
+
+
 class Mt3App:
   """Tkinter desktop UI."""
 
@@ -110,6 +152,7 @@ class Mt3App:
     self.messagebox = messagebox
     self.queue = queue.Queue()
     self.busy = False
+    self._prompted_download = False
     self.last_output = None
     self.config = load_config()
     self.checkpoint_dir = Path(self.config.get('checkpoint_dir', CHECKPOINT_DIR))
@@ -119,7 +162,7 @@ class Mt3App:
     root.title('MT3 扒谱工具')
     root.minsize(640, 460)
 
-    self.model_var = tk.StringVar(value=self.config.get('model', 'ismir2021'))
+    self.model_var = tk.StringVar(value=self.config.get('model', 'mt3'))
     self.device_var = tk.StringVar(value=self.config.get('device', 'auto'))
     self.batch_var = tk.StringVar(value=str(self.config.get('batch', 8)))
     self.checkpoint_var = tk.StringVar(value=str(self.checkpoint_dir))
@@ -213,15 +256,12 @@ class Mt3App:
     self.input_var.trace_add('write', self.on_input_changed)
 
     self.refresh_model_status()
-    missing = missing_checkpoints(self.checkpoint_dir)
-    if missing:
-      self.log(f'未找到模型权重: {", ".join(missing)}')
-      self.log(f'请先运行: python {GUI_DIR / "download_checkpoints.py"}')
-      self.log(f'（权重目录: {CHECKPOINT_DIR}）')
-    else:
-      self.log(f'模型权重目录: {CHECKPOINT_DIR}')
+    if missing_checkpoints(self.checkpoint_dir):
+      self.log('尚未下载模型权重，可点击“下载/刷新模型”联网获取（约 340MB）。')
+    self.log(f'模型权重目录: {CHECKPOINT_DIR}')
 
     self.root.after(100, self.poll_queue)
+    self.root.after(400, self.prompt_download_if_needed)
 
   # ------------------------------------------------------------------ UI 事件
 
@@ -249,19 +289,33 @@ class Mt3App:
       self.refresh_model_status()
       self.persist_config()
 
+  def prompt_download_if_needed(self):
+    if self._prompted_download or self.busy:
+      return
+    self._prompted_download = True
+    missing = missing_checkpoints(Path(self.checkpoint_var.get()))
+    if not missing:
+      return
+    if self.messagebox.askyesno(
+        '缺少模型权重',
+        '尚未下载模型权重：' + ', '.join(missing)
+        + '\n\n现在联网下载吗？（约 340MB，之后可在界面里手动下载）'):
+      self.on_download_models()
+
   def on_download_models(self):
     if self.busy:
       return
+    directory = Path(self.checkpoint_var.get())
+    missing = missing_checkpoints(directory) or [m for m, _ in MODEL_CHOICES]
     self.busy = True
     self.start_button.configure(state='disabled')
     self.status_var.set('正在下载模型…')
-    self.log('开始下载模型到: ' + self.checkpoint_var.get())
+    self.log('开始下载模型到: ' + str(directory))
     def download():
       try:
         import download_checkpoints
         download_checkpoints.download_models(
-            Path(self.checkpoint_var.get()),
-            [m for m, _ in MODEL_CHOICES],
+            directory, missing,
             progress=lambda text: self.queue.put(('log', text)))
         self.queue.put(('models_done',))
       except Exception as exc:
@@ -317,10 +371,10 @@ class Mt3App:
     self.persist_config()
     missing = missing_checkpoints(Path(self.checkpoint_var.get()))
     if model_type in missing:
-      self.messagebox.showerror(
+      if self.messagebox.askyesno(
           '缺少模型权重',
-          f'{model_type} 的权重未下载。\n请先运行:\n'
-           '请点击“下载/刷新模型”，或运行 download_checkpoints.py。')
+          f'{model_type} 的权重尚未下载。\n\n现在联网下载吗？'):
+        self.on_download_models()
       return
 
     self.busy = True
@@ -515,6 +569,7 @@ def run_batch(args):
 
 
 def main():
+  ensure_supported_interpreter()
   parser = argparse.ArgumentParser(
       description='MT3 扒谱工具：音频转 MIDI（钢琴/多乐器）')
   parser.add_argument(
@@ -550,6 +605,7 @@ def main():
   if importlib.util.find_spec('tkinter') is None:
     print('未安装 Tkinter，无法启动图形界面。', file=sys.stderr)
     print('Debian/Ubuntu: sudo apt install python3-tk', file=sys.stderr)
+    print('Fedora:        sudo dnf install python3-tkinter', file=sys.stderr)
     print('或使用命令行模式: python gui/app.py --cli 音频.mp3', file=sys.stderr)
     sys.exit(1)
 

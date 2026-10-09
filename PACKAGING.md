@@ -2,26 +2,38 @@
 
 ## 本地运行
 
-在 Linux + NVIDIA GPU 机器上：
+脚本会使用独立的 `uv` 自动安装 Python 3.12 和依赖，**不依赖系统 Python 版本**，也不需要 root。
 
 ```bash
-./gui/install.sh
-./gui/run.sh
+./gui/install.sh          # 首次：装 Python 3.12 + 依赖（JAX/TensorFlow/...）
+./gui/run.sh              # 启动图形界面
 ```
 
-安装脚本默认安装 CUDA 12 JAX。若目标机使用 CUDA 13：
+安装脚本默认安装 CUDA 12 的 JAX；纯 CPU 或 CUDA 13：
 
 ```bash
+JAX_CUDA=cpu ./gui/install.sh
 JAX_CUDA=cuda13 ./gui/install.sh
+```
+
+模型权重默认**不随包分发**，首次打开界面或转谱时会提示下载（约 340MB）。
+如需在安装时一并下载：
+
+```bash
+MT3_DOWNLOAD_CHECKPOINTS=1 ./gui/install.sh
 ```
 
 GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
 
 ```bash
 ./gui/run.sh --cli song.wav --model ismir2021 --device cuda -o song.mid
-./gui/run.sh --cli song.wav --model ismir2021 --device cpu -o song.mid
-./gui/run.sh --batch-input ./audio --batch-output ./midi --model ismir2021
+./gui/run.sh --cli song.wav --model mt3 --device cpu -o song.mid
+./gui/run.sh --batch-input ./audio --batch-output ./midi --model mt3
 ```
+
+> 环境变量：`MT3_HOME` 控制 uv/Python/venv 的安装位置（默认
+> `~/.local/share/mt3-transcriber`）；`MT3_CHECKPOINT_DIR` 控制权重目录
+> （默认 `~/.cache/mt3-transcriber/checkpoints`）。
 
 ## 自检
 
@@ -29,11 +41,12 @@ GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
 .venv-mt3gui/bin/python gui/selftest.py --model ismir2021
 ```
 
-它会生成合成音频并执行完整的音频→MT3→MIDI流程。自检不代表实际音频准确率。
+它会生成合成音频并执行完整的音频→MT3→MIDI 流程。自检不代表实际音频准确率。
 
-## 构建 deb/rpm
+## 构建 deb / rpm
 
-包只包含 GUI、MT3 源码和启动器，不内置 CUDA、Python wheel 或模型权重；首次运行会在用户目录建立私有环境并下载模型。
+包只包含 GUI、MT3 源码和启动器，不内置 Python、wheel 或模型权重；首次运行会
+用 `uv` 在用户目录建立私有 3.12 环境，并提示下载模型。
 
 ```bash
 VERSION=0.1.0 ./packaging/build-deb.sh
@@ -49,8 +62,23 @@ sudo dnf install ./dist/mt3-transcriber-0.1.0-1.x86_64.rpm
 mt3-transcriber
 ```
 
-模型默认放在 `~/.cache/mt3-transcriber/checkpoints`，虚拟环境放在
-`~/.local/share/mt3-transcriber/venv`。
+依赖仅为 `git`、`curl`、`libsndfile`（Python 由 uv 自带）。
+
+## 构建 AppImage（独立、双击即用）
+
+AppImage 内置 Python 3.12 + 程序 + CPU 依赖，**不需要系统 Python、看不到终端**；
+模型权重首次启动时下载，因此可以控制在 2GiB 以内，作为 GitHub Release 的单个附件。
+
+```bash
+VERSION=0.1.0 ./packaging/build-appimage.sh
+# 产物: dist/mt3-transcriber-0.1.0-x86_64.AppImage
+```
+
+- 建议在 `ubuntu:22.04` 等较老的发行版里构建，以获得更宽的 glibc 兼容性；
+- 运行需要 FUSE（Fedora 默认有）；没有时可执行
+  `./mt3-transcriber-*.AppImage --appimage-extract-and-run`；
+- GPU：包内是 CPU 依赖，使用 GPU 的机器会在首次运行/转谱时按需安装 CUDA 版 JAX
+  （写入用户目录，不改动只读的 AppImage）。
 
 ## Docker
 
@@ -72,6 +100,8 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`.github/workflows/packages.yml` 会执行静态检查、构建 deb/rpm、构建 Docker 镜像，且在 tag 触发时上传 GitHub Release 和 SHA256SUMS。
+`.github/workflows/packages.yml` 会执行静态检查，构建 deb/rpm/AppImage，构建 Docker
+镜像作为验证，并在 tag 触发时上传 GitHub Release 和 SHA256SUMS。
 
-官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行 `selftest.py`。
+官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行
+`selftest.py`。

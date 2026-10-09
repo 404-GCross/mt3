@@ -36,4 +36,21 @@ fi
 # 不预先占满显存，避免影响桌面/其他程序。
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
+# uv 提供的 Python 自带 Tcl/Tk，但个别情况下需要显式指向它的 init.tcl。
+if [ -z "${TCL_LIBRARY:-}" ]; then
+  TCL_DIR="$("$VENV_DIR/bin/python" - <<'PY'
+import os
+import sys
+for name in ('tcl8.6', 'tcl8.7', 'tcl9.0'):
+  candidate = os.path.join(sys.base_prefix, 'lib', name)
+  if os.path.isdir(candidate):
+    print(candidate)
+    break
+PY
+)"
+  if [ -n "${TCL_DIR:-}" ]; then
+    export TCL_LIBRARY="$TCL_DIR"
+  fi
+fi
+
 exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/app.py" "$@"

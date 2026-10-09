@@ -6,3 +6,4 @@ checkpoints/
 dist/
 .package/
 .rpmbuild/
+.appimage/

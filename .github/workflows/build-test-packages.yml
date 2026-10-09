@@ -35,7 +35,7 @@ jobs:
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev fakeroot python3-tk
+          sudo apt-get install -y dpkg-dev fakeroot
       - name: Build package
         run: VERSION=0.0.0 ./packaging/build-deb.sh
       - name: Inspect package

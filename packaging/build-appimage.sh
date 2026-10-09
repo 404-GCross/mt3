@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+# 构建 MT3 Transcriber 的独立 AppImage。
+#
+# 内置：uv 提供的 Python 3.12 + 程序代码 + CPU 版依赖（jax/tensorflow/...）。
+# 不内置模型权重（首次启动时由 GUI 提示下载），因此可以控制体积、
+# 作为 GitHub Release 的单个附件（< 2 GiB）发布。
+#
+# 用法:
+#   VERSION=0.1.0 ./packaging/build-appimage.sh
+#
+# 需要联网（uv + Python + pip 依赖）。建议在较老的发行版（如 ubuntu:22.04）里
+# 构建，以获得更宽的 glibc 兼容性。
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION="${VERSION:-0.1.0}"
+ARCH="${ARCH:-x86_64}"
+OUT="$ROOT/dist"
+WORK="$ROOT/.appimage"
+APPDIR="$WORK/MT3Transcriber.AppDir"
+UV_PYTHON_INSTALL_DIR="$APPDIR/usr/python"
+UV_CACHE_DIR="$WORK/uv-cache"
+UV_BIN="$WORK/uv"
+export UV_PYTHON_INSTALL_DIR UV_CACHE_DIR
+
+log() { printf '\033[1;32m[appimage]\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m[appimage]\033[0m %s\n' "$*" >&2; exit 1; }
+
+fetch() {  # fetch URL DEST
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 -o "$2" "$1"
+  else
+    wget -O "$2" "$1"
+  fi
+}
+
+rm -rf "$WORK"
+mkdir -p "$APPDIR/usr/share/mt3-transcriber" "$APPDIR/usr/bin" "$OUT"
+
+# ---------------------------------------------------------------- 程序代码
+log "复制程序代码…"
+find "$ROOT/mt3" "$ROOT/gui" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+cp -a "$ROOT/mt3" "$ROOT/gui" "$APPDIR/usr/share/mt3-transcriber/"
+for f in setup.py setup.cfg LICENSE README.md; do
+  [ -e "$ROOT/$f" ] && cp -a "$ROOT/$f" "$APPDIR/usr/share/mt3-transcriber/"
+done
+SOURCE_DIR="$APPDIR/usr/share/mt3-transcriber"
+
+# ---------------------------------------------------------------- uv + Python
+log "下载 uv…"
+uv_arch="$ARCH-unknown-linux-gnu"
+fetch "https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz" "$WORK/uv.tar.gz"
+tar -xzf "$WORK/uv.tar.gz" -C "$WORK"
+found="$(find "$WORK" -maxdepth 2 -type f -name uv | head -1)"
+[ -n "$found" ] || die "uv 解压失败"
+cp "$found" "$UV_BIN"
+chmod 755 "$UV_BIN"
+
+log "安装 Python 3.12（随 AppImage 分发的独立解释器）…"
+"$UV_BIN" python install 3.12
+
+log "创建可重定位虚拟环境并安装依赖（CPU）…"
+"$UV_BIN" venv --relocatable --python 3.12 --python-preference only-managed "$APPDIR/usr/venv"
+VENV_PY="$APPDIR/usr/venv/bin/python"
+"$UV_BIN" pip install --python "$VENV_PY" jax
+"$UV_BIN" pip install --python "$VENV_PY" "$SOURCE_DIR"
+
+# ---------------------------------------------------------------- 运行时文件
+log "写入 AppRun / desktop / 图标…"
+cat > "$APPDIR/AppRun" <<'EOF'
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export MT3_CHECKPOINT_DIR="${MT3_CHECKPOINT_DIR:-$HOME/.cache/mt3-transcriber/checkpoints}"
+export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
+if [ -z "${TCL_LIBRARY:-}" ]; then
+  for d in "$HERE"/usr/python/*/lib/tcl8.6 "$HERE"/usr/python/*/lib/tcl9.0; do
+    if [ -d "$d" ]; then export TCL_LIBRARY="$d"; break; fi
+  done
+fi
+exec "$HERE/usr/venv/bin/python" \
+  "$HERE/usr/share/mt3-transcriber/gui/app.py" "$@"
+EOF
+chmod 755 "$APPDIR/AppRun"
+
+cat > "$APPDIR/mt3-transcriber.desktop" <<'EOF'
+[Desktop Entry]
+Type=Application
+Name=MT3 Transcriber
+Comment=AI music transcription to MIDI
+Exec=mt3-transcriber
+Icon=mt3-transcriber
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+EOF
+
+python3 - "$APPDIR/mt3-transcriber.png" <<'PY'
+import struct
+import sys
+import zlib
+
+size = 256
+rows = bytearray()
+for y in range(size):
+  row = bytearray([0])  # filter type 0
+  for x in range(size):
+    # 深蓝背景上画几条白色"琴键"。
+    if 60 <= x < 200 and 40 <= y < 216 and (x - 60) % 28 < 16:
+      row += bytes((255, 255, 255))
+    else:
+      row += bytes((38, 57, 92))
+  rows += row
+
+
+def chunk(tag, data):
+  return (struct.pack('>I', len(data)) + tag + data
+          + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
+
+
+png = b'\x89PNG\r\n\x1a\n'
+png += chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
+png += chunk(b'IDAT', zlib.compress(bytes(rows), 9))
+png += chunk(b'IEND', b'')
+with open(sys.argv[1], 'wb') as handle:
+  handle.write(png)
+PY
+
+# ---------------------------------------------------------------- 打包
+log "下载 appimagetool…"
+fetch "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${ARCH}.AppImage" \
+  "$WORK/appimagetool"
+chmod 755 "$WORK/appimagetool"
+
+TARGET="$OUT/mt3-transcriber-${VERSION}-${ARCH}.AppImage"
+log "生成 $TARGET"
+ARCH="$ARCH" "$WORK/appimagetool" --appimage-extract-and-run "$APPDIR" "$TARGET"
+
+log "完成: $TARGET"
+ls -lh "$TARGET"

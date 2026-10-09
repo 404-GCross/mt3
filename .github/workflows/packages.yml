@@ -32,7 +32,7 @@ jobs:
       - name: Build Debian package
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev fakeroot python3-tk
+          sudo apt-get install -y dpkg-dev fakeroot
           VERSION="${GITHUB_REF_NAME#v}" ./packaging/build-deb.sh
       - uses: actions/upload-artifact@v4
         with:
@@ -54,6 +54,23 @@ jobs:
           name: mt3-transcriber-rpm
           path: dist/*.rpm
 
+  appimage:
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl ca-certificates file
+      - name: Build AppImage
+        run: VERSION="${GITHUB_REF_NAME#v}" ./packaging/build-appimage.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-transcriber-appimage
+          path: dist/*.AppImage
+          retention-days: 14
+
   docker:
     needs: test
     runs-on: ubuntu-22.04
@@ -66,15 +83,10 @@ jobs:
           file: Dockerfile
           tags: mt3-transcriber:${{ github.sha }}
           push: false
-          outputs: type=docker,dest=/tmp/mt3-transcriber.tar
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mt3-transcriber-docker
-          path: /tmp/mt3-transcriber.tar
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, rpm, docker]
+    needs: [deb, rpm, appimage]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4
