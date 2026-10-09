@@ -94,36 +94,7 @@ Terminal=false
 Categories=AudioVideo;Audio;Music;
 EOF
 
-python3 - "$APPDIR/mt3-transcriber.png" <<'PY'
-import struct
-import sys
-import zlib
-
-size = 256
-rows = bytearray()
-for y in range(size):
-  row = bytearray([0])  # filter type 0
-  for x in range(size):
-    # 深蓝背景上画几条白色"琴键"。
-    if 60 <= x < 200 and 40 <= y < 216 and (x - 60) % 28 < 16:
-      row += bytes((255, 255, 255))
-    else:
-      row += bytes((38, 57, 92))
-  rows += row
-
-
-def chunk(tag, data):
-  return (struct.pack('>I', len(data)) + tag + data
-          + struct.pack('>I', zlib.crc32(tag + data) & 0xffffffff))
-
-
-png = b'\x89PNG\r\n\x1a\n'
-png += chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 2, 0, 0, 0))
-png += chunk(b'IDAT', zlib.compress(bytes(rows), 9))
-png += chunk(b'IEND', b'')
-with open(sys.argv[1], 'wb') as handle:
-  handle.write(png)
-PY
+cp "$ROOT/packaging/mt3-transcriber.png" "$APPDIR/mt3-transcriber.png"
 
 # ---------------------------------------------------------------- 打包
 log "下载 appimagetool…"

@@ -8,7 +8,8 @@ PKG="$ROOT/.package/mt3-transcriber"
 rm -rf "$PKG" "$OUT"
 find "$ROOT/mt3" "$ROOT/gui" "$ROOT/packaging" -type d -name __pycache__ -prune -exec rm -rf {} +
 mkdir -p "$PKG/DEBIAN" "$PKG/usr/share/mt3-transcriber" \
-  "$PKG/usr/share/applications" "$PKG/usr/bin"
+  "$PKG/usr/share/applications" "$PKG/usr/bin" \
+  "$PKG/usr/share/icons/hicolor/256x256/apps"
 cp -a "$ROOT/mt3" "$ROOT/gui" "$ROOT/packaging" "$PKG/usr/share/mt3-transcriber/"
 find "$PKG" -type d -exec chmod 755 {} +
 cat > "$PKG/usr/bin/mt3-transcriber" <<'EOF'
@@ -17,6 +18,8 @@ exec /usr/share/mt3-transcriber/gui/run.sh "$@"
 EOF
 chmod 755 "$PKG/usr/share/mt3-transcriber/gui/"*.sh
 cp "$ROOT/packaging/mt3-transcriber.desktop" "$PKG/usr/share/applications/"
+cp "$ROOT/packaging/mt3-transcriber.png" \
+  "$PKG/usr/share/icons/hicolor/256x256/apps/"
 cat > "$PKG/DEBIAN/control" <<EOF
 Package: mt3-transcriber
 Version: $VERSION
