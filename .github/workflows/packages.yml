@@ -33,7 +33,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev fakeroot
-          VERSION="${GITHUB_REF_NAME#v}" ./packaging/build-deb.sh
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          VERSION="$VERSION" ./packaging/build-deb.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-deb
@@ -48,7 +50,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm bash coreutils
-          VERSION="${GITHUB_REF_NAME#v}" ./packaging/build-rpm.sh
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          VERSION="$VERSION" ./packaging/build-rpm.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm
@@ -64,7 +68,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y curl ca-certificates file
       - name: Build AppImage
-        run: VERSION="${GITHUB_REF_NAME#v}" ./packaging/build-appimage.sh
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          VERSION="$VERSION" ./packaging/build-appimage.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-appimage
