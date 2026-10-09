@@ -27,6 +27,7 @@ GUI 模式（默认）::
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import queue
 import subprocess
@@ -60,6 +61,20 @@ DEVICE_CHOICES = [
 
 CHECKPOINT_DIR = Path(
     os.environ.get('MT3_CHECKPOINT_DIR', str(REPO_ROOT / 'checkpoints')))
+CONFIG_DIR = Path(os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) / 'mt3-transcriber'
+CONFIG_FILE = CONFIG_DIR / 'config.json'
+
+
+def load_config():
+  try:
+    return json.loads(CONFIG_FILE.read_text(encoding='utf-8'))
+  except (OSError, ValueError):
+    return {}
+
+
+def save_config(values):
+  CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+  CONFIG_FILE.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding='utf-8')
 
 
 def open_path(path):
@@ -73,11 +88,11 @@ def open_path(path):
     subprocess.Popen(['xdg-open', path])
 
 
-def missing_checkpoints():
+def missing_checkpoints(directory=CHECKPOINT_DIR):
   """Model types whose checkpoint has not been downloaded yet."""
   missing = []
   for model_type, _ in MODEL_CHOICES:
-    if not (CHECKPOINT_DIR / model_type / 'checkpoint').exists():
+    if not (Path(directory) / model_type / 'checkpoint').exists():
       missing.append(model_type)
   return missing
 
@@ -96,14 +111,18 @@ class Mt3App:
     self.queue = queue.Queue()
     self.busy = False
     self.last_output = None
+    self.config = load_config()
+    self.checkpoint_dir = Path(self.config.get('checkpoint_dir', CHECKPOINT_DIR))
 
     root = tk.Tk()
     self.root = root
     root.title('MT3 扒谱工具')
     root.minsize(640, 460)
 
-    self.model_var = tk.StringVar(value=MODEL_CHOICES[0][0])
-    self.device_var = tk.StringVar(value='auto')
+    self.model_var = tk.StringVar(value=self.config.get('model', 'ismir2021'))
+    self.device_var = tk.StringVar(value=self.config.get('device', 'auto'))
+    self.batch_var = tk.StringVar(value=str(self.config.get('batch', 8)))
+    self.checkpoint_var = tk.StringVar(value=str(self.checkpoint_dir))
     self.input_var = tk.StringVar()
     self.output_var = tk.StringVar()
     self.status_var = tk.StringVar(value='就绪')
@@ -122,11 +141,24 @@ class Mt3App:
           variable=self.model_var).pack(side='left', padx=(0, 12))
     row += 1
 
+    ttk.Label(main, text='模型权重目录：').grid(row=row, column=0, sticky='w')
+    ttk.Entry(main, textvariable=self.checkpoint_var).grid(row=row, column=1, sticky='ew', padx=(0, 6))
+    ttk.Button(main, text='选择目录…', command=self.on_browse_checkpoint).grid(row=row, column=2, sticky='ew')
+    row += 1
+    self.model_status_var = tk.StringVar()
+    ttk.Button(main, text='下载/刷新模型', command=self.on_download_models).grid(row=row, column=0, sticky='w')
+    ttk.Label(main, textvariable=self.model_status_var).grid(row=row, column=1, columnspan=2, sticky='w')
+    row += 1
+
     ttk.Label(main, text='设备：').grid(row=row, column=0, sticky='w')
     ttk.Combobox(
         main, textvariable=self.device_var,
         values=[label for _, label in DEVICE_CHOICES], state='readonly',
         width=28).grid(row=row, column=1, sticky='w')
+    row += 1
+
+    ttk.Label(main, text='Batch Size：').grid(row=row, column=0, sticky='w')
+    ttk.Spinbox(main, from_=1, to=128, textvariable=self.batch_var, width=8).grid(row=row, column=1, sticky='w')
     row += 1
 
     ttk.Label(main, text='音频文件：').grid(row=row, column=0, sticky='w')
@@ -180,7 +212,8 @@ class Mt3App:
 
     self.input_var.trace_add('write', self.on_input_changed)
 
-    missing = missing_checkpoints()
+    self.refresh_model_status()
+    missing = missing_checkpoints(self.checkpoint_dir)
     if missing:
       self.log(f'未找到模型权重: {", ".join(missing)}')
       self.log(f'请先运行: python {GUI_DIR / "download_checkpoints.py"}')
@@ -191,6 +224,49 @@ class Mt3App:
     self.root.after(100, self.poll_queue)
 
   # ------------------------------------------------------------------ UI 事件
+
+  def refresh_model_status(self):
+    missing = missing_checkpoints(Path(self.checkpoint_var.get()))
+    installed = [m for m, _ in MODEL_CHOICES if m not in missing]
+    text = '已安装：' + (', '.join(installed) or '无')
+    if missing:
+      text += '；缺少：' + ', '.join(missing)
+    self.model_status_var.set(text)
+
+  def persist_config(self):
+    try:
+      batch = max(1, int(self.batch_var.get()))
+    except ValueError:
+      batch = 8
+      self.batch_var.set('8')
+    save_config({'model': self.model_var.get(), 'device': self.device_var.get(),
+                 'batch': batch, 'checkpoint_dir': self.checkpoint_var.get()})
+
+  def on_browse_checkpoint(self):
+    path = self.filedialog.askdirectory(title='选择模型权重目录', initialdir=self.checkpoint_var.get())
+    if path:
+      self.checkpoint_var.set(path)
+      self.refresh_model_status()
+      self.persist_config()
+
+  def on_download_models(self):
+    if self.busy:
+      return
+    self.busy = True
+    self.start_button.configure(state='disabled')
+    self.status_var.set('正在下载模型…')
+    self.log('开始下载模型到: ' + self.checkpoint_var.get())
+    def download():
+      try:
+        import download_checkpoints
+        download_checkpoints.download_models(
+            Path(self.checkpoint_var.get()),
+            [m for m, _ in MODEL_CHOICES],
+            progress=lambda text: self.queue.put(('log', text)))
+        self.queue.put(('models_done',))
+      except Exception as exc:
+        self.queue.put(('error', f'{type(exc).__name__}: {exc}', traceback.format_exc()))
+    threading.Thread(target=download, daemon=True).start()
 
   def on_browse_input(self):
     path = self.filedialog.askopenfilename(
@@ -238,12 +314,13 @@ class Mt3App:
         '覆盖确认', f'文件已存在，是否覆盖？\n{output}'):
       return
 
-    missing = missing_checkpoints()
+    self.persist_config()
+    missing = missing_checkpoints(Path(self.checkpoint_var.get()))
     if model_type in missing:
       self.messagebox.showerror(
           '缺少模型权重',
           f'{model_type} 的权重未下载。\n请先运行:\n'
-          f'python {GUI_DIR / "download_checkpoints.py"}')
+           '请点击“下载/刷新模型”，或运行 download_checkpoints.py。')
       return
 
     self.busy = True
@@ -274,7 +351,8 @@ class Mt3App:
       device = self.device_var.get()
       device = dict((label, value) for value, label in DEVICE_CHOICES).get(
           device, device)
-      transcriber = backend.get_transcriber(device=device, batch_size=8)
+      transcriber = backend.get_transcriber(
+          device=device, batch_size=max(1, int(self.batch_var.get())))
 
       def progress_cb(done, total):
         q.put(('progress', done, total))
@@ -308,6 +386,13 @@ class Mt3App:
     kind = message[0]
     if kind == 'status':
       self.status_var.set(message[1])
+    elif kind == 'models_done':
+      self.busy = False
+      self.start_button.configure(state='normal')
+      self.refresh_model_status()
+      self.persist_config()
+      self.status_var.set('模型已更新')
+      self.log('模型下载完成。')
     elif kind == 'log':
       self.log(message[1])
     elif kind == 'progress':

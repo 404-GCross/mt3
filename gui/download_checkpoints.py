@@ -111,7 +111,31 @@ def human_bytes(num):
   for unit in ('B', 'KB', 'MB', 'GB'):
     if num < 1024 or unit == 'GB':
       return f'{num:.1f} {unit}' if unit != 'B' else f'{int(num)} B'
-    num /= 1024
+      num /= 1024
+
+
+def download_models(dest, models, progress=None):
+  """Download selected models for use by the GUI."""
+  models = list(models)
+  jobs = []
+  for model in models:
+    objects = list(list_objects(f'{BUCKET_PREFIX}{model}/'))
+    if not objects:
+      raise RuntimeError(f'远端未找到模型: {model}')
+    jobs.extend(objects)
+  dest = Path(dest)
+  dest.mkdir(parents=True, exist_ok=True)
+  with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    futures = [executor.submit(download_file, name, size, dest)
+               for name, size in jobs]
+    for index, future in enumerate(futures, 1):
+      future.result()
+      if progress:
+        progress(f'模型下载进度: {index}/{len(futures)}')
+  for model in models:
+    marker = dest / model / 'checkpoint'
+    if not marker.exists():
+      raise RuntimeError(f'模型下载完成但缺少标记文件: {marker}')
 
 
 def main():
