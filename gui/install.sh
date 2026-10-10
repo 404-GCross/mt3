@@ -201,11 +201,41 @@ else
 fi
 
 log "安装 MT3 及依赖（tensorflow/flax/t5x/seqio/note-seq，约 5~15 分钟）…"
-# 非 editable 安装，避免向只读的 /usr/share 写入文件。
 if [ ! -e "$REPO_DIR/setup.py" ] && [ ! -e "$REPO_DIR/pyproject.toml" ]; then
   die "安装目录缺少 setup.py（$REPO_DIR）：包不完整，请重新安装最新版本。"
 fi
-"$UV" pip install --python "$VENV_PY" "$REPO_DIR"
+# deb/rpm 的 /usr/share/mt3-transcriber 是只读的，setuptools 无法在那里创建
+# build/（error: could not create 'build/lib/mt3': Permission denied）。先复制到
+# 可写临时目录，再从那里做非 editable 安装。
+stage="$(mktemp -d)"
+for f in setup.py setup.cfg; do
+  if [ -e "$REPO_DIR/$f" ]; then cp -a "$REPO_DIR/$f" "$stage/"; fi
+done
+cp -a "$REPO_DIR/mt3" "$stage/"
+# 万一源目录权限异常，确保暂存目录可读可写（setuptools 要在这里建 build/）。
+chmod -R u+rwX "$stage" 2>/dev/null || true
+
+# 网络抖动时 uv 拉 git 依赖会失败（例如 HTTP/2 stream not closed cleanly）。
+# 重试 3 次，从第二次起强制 git 走 HTTP/1.1 并加大缓冲。
+install_ok=0
+for attempt in 1 2 3; do
+  if [ "$attempt" -eq 1 ]; then
+    if "$UV" pip install --python "$VENV_PY" "$stage"; then install_ok=1; break; fi
+  else
+    warn "第 $((attempt - 1)) 次安装失败，改用 HTTP/1.1 重试（$attempt/3）…"
+    if GIT_CONFIG_COUNT=2 \
+      GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
+      GIT_CONFIG_KEY_1=http.postBuffer GIT_CONFIG_VALUE_1=524288000 \
+      "$UV" pip install --python "$VENV_PY" "$stage"; then
+      install_ok=1
+      break
+    fi
+  fi
+  sleep 5
+done
+rm -rf "$stage"
+[ "$install_ok" -eq 1 ] \
+  || die "依赖安装失败（网络或构建问题）：请检查网络后重新运行 mt3-transcriber。"
 
 # ---------------------------------------------------------------- 模型权重
 if [ "${MT3_DOWNLOAD_CHECKPOINTS:-0}" = "1" ]; then

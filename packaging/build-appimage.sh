@@ -66,6 +66,8 @@ log "创建可重定位虚拟环境并安装依赖（CPU）…"
 VENV_PY="$APPDIR/usr/venv/bin/python"
 "$UV_BIN" pip install --python "$VENV_PY" jax
 "$UV_BIN" pip install --python "$VENV_PY" "$SOURCE_DIR"
+# 清掉 setuptools 就地构建留下的产物，别打进 AppImage。
+rm -rf "$SOURCE_DIR/build" "$SOURCE_DIR"/*.egg-info
 
 # 内置一份带 Xft 的 Tcl/Tk（uv 自带的 Tcl/Tk 未启用 Xft，中文会显示为空白），
 # 并把字体栈依赖一并复制进来，做到目标机零依赖。
