@@ -83,6 +83,9 @@ fi
 log "编译安装 Tk ${TK_VERSION}（--enable-xft）-> $PREFIX"
 (
   cd "$WORK/tk${TK_VERSION}/unix"
+  # Tk 的 configure 会运行刚编译出的 tclsh；它动态链接 libtcl9.0.so，需要能从
+  # 构建目录/安装前缀找到该库，否则报 "cannot find a usable native Tcl 9 tclsh"。
+  export LD_LIBRARY_PATH="$PREFIX/lib:$WORK/tcl${TCL_VERSION}/unix${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   ./configure --prefix="$PREFIX" --with-tcl="$PREFIX/lib" \
     --enable-shared --enable-threads --disable-zipfs --enable-xft
   make -j"$JOBS"
