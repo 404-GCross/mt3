@@ -7,6 +7,8 @@ find "$ROOT/mt3" "$ROOT/gui" "$ROOT/packaging" -type d -name __pycache__ -prune 
 mkdir -p "$ROOT/.rpmbuild"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 mkdir -p "$ROOT/.rpmbuild/SOURCES/mt3-transcriber"
 cp -a "$ROOT/mt3" "$ROOT/gui" "$ROOT/packaging" "$ROOT/.rpmbuild/SOURCES/mt3-transcriber/"
+# setup.py/setup.cfg 必须在，install.sh 才能 pip install 本包并装齐依赖。
+cp -a "$ROOT/setup.py" "$ROOT/setup.cfg" "$ROOT/.rpmbuild/SOURCES/mt3-transcriber/"
 # 随包分发带 Xft 的 Tcl/Tk（由 packaging/build-tcltk.sh 生成），修复中文空白。
 TCLTK_DIR="${TCLTK_DIR:-}"
 if [ -n "$TCLTK_DIR" ] && [ -d "$TCLTK_DIR/lib" ]; then

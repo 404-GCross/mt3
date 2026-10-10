@@ -33,6 +33,14 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   exit 1
 fi
 
+# 现有 venv 若不完整（例如旧版本首次安装时失败，依赖没装上），自动重跑安装修复。
+if [ ! -e "$VENV_DIR/.mt3-installed" ]; then
+  if [ -x "$SCRIPT_DIR/install.sh" ]; then
+    echo "检测到 MT3 环境不完整，正在修复…" >&2
+    VENV_DIR="$VENV_DIR" "$SCRIPT_DIR/install.sh"
+  fi
+fi
+
 # 不预先占满显存，避免影响桌面/其他程序。
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 

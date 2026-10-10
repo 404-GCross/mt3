@@ -173,6 +173,8 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
   "$UV" venv --python "$PYTHON_VERSION" --python-preference only-managed "$VENV_DIR"
 fi
 VENV_PY="$VENV_DIR/bin/python"
+# 安装完成标记；run.sh 用它判断现有 venv 是否完整，缺失时自动重跑本脚本修复。
+rm -f "$VENV_DIR/.mt3-installed"
 
 # 让 Tk 具备 Xft/fontconfig 支持（uv 自带的 Tcl/Tk 没有），否则中文字体显示为
 # 空白。优先使用随包分发的、我们自己编的 Tcl/Tk；没有时退回系统自带的同版本
@@ -200,6 +202,9 @@ fi
 
 log "安装 MT3 及依赖（tensorflow/flax/t5x/seqio/note-seq，约 5~15 分钟）…"
 # 非 editable 安装，避免向只读的 /usr/share 写入文件。
+if [ ! -e "$REPO_DIR/setup.py" ] && [ ! -e "$REPO_DIR/pyproject.toml" ]; then
+  die "安装目录缺少 setup.py（$REPO_DIR）：包不完整，请重新安装最新版本。"
+fi
 "$UV" pip install --python "$VENV_PY" "$REPO_DIR"
 
 # ---------------------------------------------------------------- 模型权重
@@ -222,6 +227,7 @@ print('  jax devices:', jax.devices())
 print('  tensorflow :', tf.__version__)
 print('  t5x / note_seq / librosa: OK')
 PY
+touch "$VENV_DIR/.mt3-installed"
 
 log "安装完成。"
 log "  启动图形界面:   $SCRIPT_DIR/run.sh"

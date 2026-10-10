@@ -18,7 +18,7 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_prefix}/share/mt3-transcriber
 mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
-cp -a mt3 gui packaging %{buildroot}%{_prefix}/share/mt3-transcriber/
+cp -a mt3 gui packaging setup.py setup.cfg %{buildroot}%{_prefix}/share/mt3-transcriber/
 if [ -d tcltk ]; then
   cp -a tcltk %{buildroot}%{_prefix}/share/mt3-transcriber/
 fi
