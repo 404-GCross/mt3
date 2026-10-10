@@ -67,23 +67,26 @@ GLIBC_PREFIXES = (
 )
 
 INSTALL_HINTS = {
-    'dnf': 'sudo dnf install tcl9 tk9',
+    'dnf': 'sudo dnf install tcl tk',
     'apt': 'sudo apt install libtcl9.0 libtk9.0',
     'pacman': 'sudo pacman -S tcl tk',
-    'zypper': 'sudo zypper install tcl9 tk9',
+    'zypper': 'sudo zypper install tcl tk',
 }
 
 
 def map_tk_name(name):
-  """Map a bundled Tk library name to the conventional ``libtk`` name.
+  """Alternative names a distributed Tk 9 library might use.
 
-  Tk 9 names its shared library ``libtcl9tk9.0.so`` (it encodes the Tcl major
-  version), while distributions ship it as ``libtk9.0.so``.
+  Tk 9 ships its shared library as ``libtcl9tk9.0.so`` (it encodes the Tcl
+  major version).  Some distributions keep that name (Fedora), others rename it
+  to ``libtk9.0.so``.  Returns a list of candidate file names to try, the real
+  name first.
   """
+  candidates = [name]
   m = re.match(r'libtcl(\d+)tk(\d+\.\d+)(\.so.*)?$', name)
   if m:
-    return f'libtk{m.group(2)}.so'
-  return name
+    candidates.append(f'libtk{m.group(2)}.so')
+  return candidates
 
 
 def python_base_prefix(python):
@@ -96,42 +99,43 @@ def python_base_prefix(python):
   return Path(out) if out else None
 
 
+def _lib_stem(name):
+  """``libtcl9tk9.0.so`` -> ``libtcl9tk9.0`` (the part before ``.so``)."""
+  index = name.find('.so')
+  return name[:index] if index != -1 else name
+
+
 def find_system_lib(name):
   """Locate a system library matching ``name`` in the same major.minor series.
 
   Restricting to the same series (e.g. ``libtk8.6``) avoids pairing a Tk 8.6
-  tkinter with a Tk 9.0 shared library.  Tk's bundled name (``libtcl9tk9.0.so``)
-  is normalised to the distribution name (``libtk9.0.so``) first.
+  tkinter with a Tk 9.0 shared library.  Both the exact name (Fedora keeps
+  ``libtcl9tk9.0.so``) and the renamed variant (``libtk9.0.so``) are tried.
   """
-  name = map_tk_name(name)
-  match = re.match(r'(lib(?:tcl|tk)(\d+\.\d+))', name)
-  if not match:
-    return None
-  stem = match.group(1)
-  for directory in SYSTEM_LIB_DIRS:
-    if not directory.is_dir():
-      continue
-    exact = directory / name
-    if exact.exists():
-      return exact
-    matches = sorted(directory.glob(stem + '*.so*'))
-    if matches:
-      return matches[0]
+  for candidate_name in map_tk_name(name):
+    stem = _lib_stem(candidate_name)
+    for directory in SYSTEM_LIB_DIRS:
+      if not directory.is_dir():
+        continue
+      exact = directory / candidate_name
+      if exact.exists():
+        return exact
+      matches = sorted(directory.glob(stem + '*.so*'))
+      if matches:
+        return matches[0]
   return None
 
 
 def find_source_lib(name, source):
   """Locate ``name`` inside a Tcl/Tk prefix we built (``source/lib``)."""
   lib_dir = source / 'lib'
-  for candidate_name in (name, map_tk_name(name)):
+  for candidate_name in map_tk_name(name):
     exact = lib_dir / candidate_name
     if exact.exists():
       return exact
-    match = re.match(r'(lib(?:tcl|tk)\d+\.\d+)', candidate_name)
-    if match:
-      matches = sorted(lib_dir.glob(match.group(1) + '*.so*'))
-      if matches:
-        return matches[0]
+    matches = sorted(lib_dir.glob(_lib_stem(candidate_name) + '*.so*'))
+    if matches:
+      return matches[0]
   return None
 
 
