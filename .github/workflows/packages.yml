@@ -158,6 +158,11 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+          pattern: mt3-transcriber-*
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          name: mt3-tcltk
       - name: Checksums
         run: |
           # 随包 Tcl/Tk（带 Xft）也发布出去，方便手动修复已有 venv。
