@@ -92,19 +92,23 @@ sudo pacman -S tcl tk              # Arch
 
 ## 构建 AppImage（独立、双击即用）
 
-AppImage 内置 Python 3.12 + 程序 + CPU 依赖，**不需要系统 Python、看不到终端**；
-模型权重首次启动时下载，因此可以控制在 2GiB 以内，作为 GitHub Release 的单个附件。
+AppImage 内置 Python 3.12 + 程序 + CPU 依赖 + **带 Xft 的 Tcl/Tk + Noto Sans CJK
+中文字体**，因此**不依赖系统的 Python、Tcl/Tk 或中文字体**，也看不到终端；模型
+权重首次启动时下载，从而把体积控制在 2GiB 以内，作为 GitHub Release 的单个附件。
 
 ```bash
 VERSION=0.1.0 ./packaging/build-appimage.sh
 # 产物: dist/mt3-transcriber-0.1.0-x86_64.AppImage
 ```
 
+- 构建机需要 `fonts-noto-cjk` 以及系统 Tcl/Tk 8.6（`libtcl8.6 libtk8.6 libxft2
+  libfontconfig1 libfreetype6 libxrender1`）；脚本会把它们复制进包。
 - 建议在 `ubuntu:22.04` 等较老的发行版里构建，以获得更宽的 glibc 兼容性；
 - 运行需要 FUSE（Fedora 默认有）；没有时可执行
   `./mt3-transcriber-*.AppImage --appimage-extract-and-run`；
 - GPU：包内是 CPU 依赖，使用 GPU 的机器会在首次运行/转谱时按需安装 CUDA 版 JAX
   （写入用户目录，不改动只读的 AppImage）。
+- 自检中文渲染：`./mt3-transcriber-*.AppImage --check-fonts`（CI 会用 Xvfb 跑它）。
 
 ## Docker
 

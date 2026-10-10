@@ -192,6 +192,42 @@ def configure_cjk_fonts(root):
   return chosen
 
 
+def check_fonts():
+  """Headless smoke test that Tk can actually see a CJK font.
+
+  Used by CI against the packaged AppImage to catch the "Chinese labels are
+  blank" regression (bundled Tk without Xft, or a missing bundled font).
+  Returns a process exit code.
+  """
+  import importlib.util
+
+  if importlib.util.find_spec('tkinter') is None:
+    print('FAIL: tkinter is not available', file=sys.stderr)
+    return 1
+  import tkinter as tk
+  import tkinter.font as tkfont
+
+  root = tk.Tk()
+  root.withdraw()
+  chosen = configure_cjk_fonts(root)
+  families = sorted(tkfont.families(root))
+  default_font = tkfont.nametofont('TkDefaultFont')
+  width = default_font.measure('中文测试')
+
+  print(f'tk default family: {default_font.actual("family")}')
+  print(f'cjk family chosen: {chosen}')
+  print(f'measure("中文测试") = {width}')
+  if chosen is None:
+    print('FAIL: no CJK font family is visible to Tk', file=sys.stderr)
+    print('first families: ' + ', '.join(families[:40]), file=sys.stderr)
+    return 1
+  if width <= 0:
+    print('FAIL: CJK text renders with zero width', file=sys.stderr)
+    return 1
+  print('OK: CJK font available to Tk')
+  return 0
+
+
 class Mt3App:
   """Tkinter desktop UI."""
 
@@ -658,7 +694,12 @@ def main():
                       help='批量模式输入目录')
   parser.add_argument('--batch-output', metavar='DIR',
                       help='批量模式输出目录')
+  parser.add_argument('--check-fonts', action='store_true',
+                      help=argparse.SUPPRESS)
   args = parser.parse_args()
+
+  if args.check_fonts:
+    sys.exit(check_fonts())
 
   if args.batch_input:
     if not args.batch_output:

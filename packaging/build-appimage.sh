@@ -73,6 +73,24 @@ log "内置带 Xft 的系统 Tcl/Tk 与字体栈…"
 "$VENV_PY" "$ROOT/gui/fix_tk_system.py" --python "$VENV_PY" --mode copy \
   || warn "未内置系统 Tcl/Tk；AppImage 的中文可能显示为空白。"
 
+# 内置一款中文字体，这样即使目标机没装任何 CJK 字体也能显示中文。
+log "内置中文字体（Noto Sans CJK）…"
+font_src=""
+for candidate in \
+  /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc \
+  /usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf \
+  /usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc; do
+  if [ -e "$candidate" ]; then font_src="$candidate"; break; fi
+done
+mkdir -p "$APPDIR/usr/share/fonts"
+if [ -n "$font_src" ]; then
+  cp "$font_src" "$APPDIR/usr/share/fonts/"
+  log "字体: $(basename "$font_src")"
+else
+  warn "未找到 Noto CJK 字体；AppImage 的中文可能显示为空白。"
+  warn "构建机请先安装: sudo apt-get install fonts-noto-cjk"
+fi
+
 # ---------------------------------------------------------------- 运行时文件
 log "写入 AppRun / desktop / 图标…"
 cat > "$APPDIR/AppRun" <<'EOF'
@@ -80,6 +98,15 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 export MT3_CHECKPOINT_DIR="${MT3_CHECKPOINT_DIR:-$HOME/.cache/mt3-transcriber/checkpoints}"
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
+# 让 fontconfig 扫描包内字体（<XDG_DATA_DIRS>/fonts），缓存写到用户目录。
+export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+# 包内复制进来的系统 Tcl/Tk 及其字体栈依赖。
+for d in "$HERE"/usr/python/*/lib; do
+  if [ -d "$d" ]; then
+    export LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+done
 if [ -z "${TCL_LIBRARY:-}" ]; then
   for d in "$HERE"/usr/python/*/lib/tcl8.6 "$HERE"/usr/python/*/lib/tcl9.0; do
     if [ -d "$d" ]; then export TCL_LIBRARY="$d"; break; fi

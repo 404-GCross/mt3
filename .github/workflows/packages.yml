@@ -66,13 +66,32 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl ca-certificates file \
+          sudo apt-get install -y curl ca-certificates file xvfb fonts-noto-cjk \
             libtcl8.6 libtk8.6 libxft2 libfontconfig1 libfreetype6 libxrender1
       - name: Build AppImage
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
           VERSION="$VERSION" ./packaging/build-appimage.sh
+      - name: Smoke test CJK fonts in AppImage
+        run: |
+          set -euo pipefail
+          appimage="$(ls dist/*.AppImage)"
+          "$appimage" --appimage-extract >/dev/null
+          appdir="$PWD/squashfs-root"
+          test -n "$(find "$appdir/usr/share/fonts" -type f \
+            \( -name '*.ttc' -o -name '*.otf' -o -name '*.ttf' \) -print -quit)"
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/cache"
+          cat > "$tmp/fonts.conf" <<XML
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <dir>$appdir/usr/share/fonts</dir>
+            <cachedir>$tmp/cache</cachedir>
+          </fontconfig>
+          XML
+          FONTCONFIG_FILE="$tmp/fonts.conf" xvfb-run -a "$appdir/AppRun" --check-fonts
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-appimage
