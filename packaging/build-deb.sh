@@ -29,7 +29,7 @@ Architecture: $ARCH
 Maintainer: MT3 Contributors
 Description: MT3 music transcription desktop application
  Audio to MIDI transcription with piano and multi-instrument models.
-Depends: git, curl, ca-certificates, libsndfile1
+Depends: git, curl, ca-certificates, libsndfile1, libtcl8.6, libtk8.6
 EOF
 cat > "$PKG/DEBIAN/postinst" <<'EOF'
 #!/usr/bin/env bash

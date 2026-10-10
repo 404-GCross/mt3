@@ -25,6 +25,7 @@ UV_BIN="$WORK/uv"
 export UV_PYTHON_INSTALL_DIR UV_CACHE_DIR
 
 log() { printf '\033[1;32m[appimage]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[appimage]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[appimage]\033[0m %s\n' "$*" >&2; exit 1; }
 
 fetch() {  # fetch URL DEST
@@ -66,6 +67,12 @@ VENV_PY="$APPDIR/usr/venv/bin/python"
 "$UV_BIN" pip install --python "$VENV_PY" jax
 "$UV_BIN" pip install --python "$VENV_PY" "$SOURCE_DIR"
 
+# 用系统带 Xft 的 Tcl/Tk 覆盖自带版本（AppImage 只读，只能复制而不能符号链接），
+# 否则 Tk 看不到系统字体，中文显示为空白。需要构建机装有 tcl/tk。
+log "内置带 Xft 的系统 Tcl/Tk 与字体栈…"
+"$VENV_PY" "$ROOT/gui/fix_tk_system.py" --python "$VENV_PY" --mode copy \
+  || warn "未内置系统 Tcl/Tk；AppImage 的中文可能显示为空白。"
+
 # ---------------------------------------------------------------- 运行时文件
 log "写入 AppRun / desktop / 图标…"
 cat > "$APPDIR/AppRun" <<'EOF'
@@ -76,6 +83,11 @@ export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 if [ -z "${TCL_LIBRARY:-}" ]; then
   for d in "$HERE"/usr/python/*/lib/tcl8.6 "$HERE"/usr/python/*/lib/tcl9.0; do
     if [ -d "$d" ]; then export TCL_LIBRARY="$d"; break; fi
+  done
+fi
+if [ -z "${TK_LIBRARY:-}" ]; then
+  for d in "$HERE"/usr/python/*/lib/tk8.6 "$HERE"/usr/python/*/lib/tk9.0; do
+    if [ -d "$d" ]; then export TK_LIBRARY="$d"; break; fi
   done
 fi
 exec "$HERE/usr/venv/bin/python" \

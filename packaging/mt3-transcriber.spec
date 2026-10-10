@@ -4,7 +4,7 @@ Release: 1%{?dist}
 Summary: MT3 music transcription desktop application
 License: Apache-2.0
 BuildArch: x86_64
-Requires: git, curl, libsndfile
+Requires: git, curl, libsndfile, tcl, tk
 Source0: mt3-transcriber.tar.gz
 
 %description

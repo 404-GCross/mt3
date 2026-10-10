@@ -36,21 +36,27 @@ fi
 # 不预先占满显存，避免影响桌面/其他程序。
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
-# uv 提供的 Python 自带 Tcl/Tk，但个别情况下需要显式指向它的 init.tcl。
-if [ -z "${TCL_LIBRARY:-}" ]; then
-  TCL_DIR="$("$VENV_DIR/bin/python" - <<'PY'
+# uv 提供的 Python 自带 Tcl/Tk；显式指向它的脚本目录，便于配合系统库使用。
+if [ -z "${TCL_LIBRARY:-}" ] || [ -z "${TK_LIBRARY:-}" ]; then
+  read -r TCL_DIR TK_DIR < <("$VENV_DIR/bin/python" - <<'PY'
 import os
 import sys
+tcl = tk = ''
 for name in ('tcl8.6', 'tcl8.7', 'tcl9.0'):
   candidate = os.path.join(sys.base_prefix, 'lib', name)
   if os.path.isdir(candidate):
-    print(candidate)
+    tcl = candidate
     break
+for name in ('tk8.6', 'tk8.7', 'tk9.0'):
+  candidate = os.path.join(sys.base_prefix, 'lib', name)
+  if os.path.isdir(candidate):
+    tk = candidate
+    break
+print(tcl, tk)
 PY
-)"
-  if [ -n "${TCL_DIR:-}" ]; then
-    export TCL_LIBRARY="$TCL_DIR"
-  fi
+)
+  [ -n "${TCL_LIBRARY:-}" ] || { [ -n "${TCL_DIR:-}" ] && export TCL_LIBRARY="$TCL_DIR"; }
+  [ -n "${TK_LIBRARY:-}" ] || { [ -n "${TK_DIR:-}" ] && export TK_LIBRARY="$TK_DIR"; }
 fi
 
 exec "$VENV_DIR/bin/python" "$SCRIPT_DIR/app.py" "$@"

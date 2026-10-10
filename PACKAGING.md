@@ -62,22 +62,33 @@ sudo dnf install ./dist/mt3-transcriber-0.1.0-1.x86_64.rpm
 mt3-transcriber
 ```
 
-依赖仅为 `git`、`curl`、`libsndfile`（Python 由 uv 自带）。
+依赖仅为 `git`、`curl`、`libsndfile`、`tcl`、`tk`（Python 由 uv 自带）。
 
-## 中文字体（GUI 显示空白时）
+## 中文字体 / Tk 显示空白
 
-uv 自带的 Tk 不会自动回退到中文字体，若系统里没有 CJK 字体，界面中文会显示为
-空白（只剩 ASCII 和 `/`、`:` 等）。程序会自动挑选一款已安装的中文字体；若一款都没
-有，会弹窗提示安装：
+uv 自带的 Tk 是**不带 Xft/fontconfig** 编译的，因此看不到系统字体，中英文以外
+的文字（如中文）会显示为空白——只剩 ASCII 和 `/`、`:`。这不是缺字体，装
+`google-noto-sans-cjk-fonts` 也没用。
+
+安装脚本会运行 `gui/fix_tk_system.py`，把 uv 自带的 `libtcl/libtk` 换（符号
+链接）成系统带 Xft 的版本，并放宽 `init.tcl` 的 Tcl 版本校验。需要系统里有
+Tcl/Tk 8.6：
 
 ```bash
-sudo dnf install google-noto-sans-cjk-fonts      # Fedora
-sudo apt install fonts-noto-cjk                  # Debian/Ubuntu
-sudo pacman -S noto-fonts-cjk                    # Arch
-sudo zypper install noto-sans-cjk-fonts          # openSUSE
+sudo dnf install tcl tk            # Fedora
+sudo apt install libtcl8.6 libtk8.6  # Debian/Ubuntu
+sudo pacman -S tcl tk              # Arch
 ```
 
-也可用 `MT3_UI_FONT="Noto Sans CJK SC"` 手动指定字体族。
+手动修复（安装后随时可跑）：
+
+```bash
+~/.local/share/mt3-transcriber/venv/bin/python \
+  /usr/share/mt3-transcriber/gui/fix_tk_system.py \
+  --python ~/.local/share/mt3-transcriber/venv/bin/python
+```
+
+还原原状加 `--reverse`。参见 python-build-standalone#740。
 
 ## 构建 AppImage（独立、双击即用）
 

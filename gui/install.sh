@@ -174,6 +174,12 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 VENV_PY="$VENV_DIR/bin/python"
 
+# 让 Tk 使用系统自带的（带 Xft/fontconfig 的）Tcl/Tk，否则中文字体显示为空白。
+# 参见 https://github.com/astral-sh/python-build-standalone/issues/740
+log "配置 Tk 字体支持（替换为系统 Tcl/Tk）…"
+"$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
+  || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+
 # ---------------------------------------------------------------- 安装依赖
 if [ "$JAX_CUDA" = "cpu" ]; then
   log "安装 JAX（CPU）…"
