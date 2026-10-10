@@ -24,55 +24,93 @@ jobs:
       - name: Check downloader
         run: python gui/download_checkpoints.py --models ismir2021 --list
 
-  deb:
-    needs: test
+  tcltk:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install Tcl/Tk build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config zlib1g-dev \
+            libx11-dev libxss-dev libxext-dev libxft-dev libfontconfig1-dev \
+            libxrender-dev
+      - name: Build Xft-capable Tcl/Tk
+        run: |
+          ./packaging/build-tcltk.sh "$PWD/.tcltk"
+          # Record what we built, then package it for the other jobs.
+          find .tcltk/lib -maxdepth 1 -name 'libtcl*tk*' -o -maxdepth 1 -name 'libtcl9*'
+          tar -czf tcltk-prefix.tar.gz -C .tcltk .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-tcltk
+          path: tcltk-prefix.tar.gz
+          retention-days: 14
+
+  deb:
+    needs: [test, tcltk]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-tcltk
+      - name: Extract Tcl/Tk
+        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
       - name: Build Debian package
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev fakeroot
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
-          VERSION="$VERSION" ./packaging/build-deb.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-deb.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-deb
           path: dist/*.deb
 
   rpm:
-    needs: test
+    needs: [test, tcltk]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-tcltk
+      - name: Extract Tcl/Tk
+        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
       - name: Build RPM package
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm bash coreutils
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
-          VERSION="$VERSION" ./packaging/build-rpm.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-rpm.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm
           path: dist/*.rpm
 
   appimage:
-    needs: test
+    needs: [test, tcltk]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-tcltk
+      - name: Extract Tcl/Tk
+        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
       - name: Install build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y curl ca-certificates file xvfb fonts-noto-cjk \
-            libtcl8.6 libtk8.6 libxft2 libfontconfig1 libfreetype6 libxrender1
+            libx11-6 libxft2 libfontconfig1 libfreetype6 libxrender1 \
+            libxss1 libxext6 libxcb1 libxau6 libxdmcp6
       - name: Build AppImage
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
-          VERSION="$VERSION" ./packaging/build-appimage.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-appimage.sh
       - name: Smoke test CJK fonts in AppImage
         run: |
           set -euo pipefail
@@ -121,7 +159,9 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: sha256sum dist/* > dist/SHA256SUMS
+        run: |
+          rm -f dist/tcltk-prefix.tar.gz   # build input, not a release asset
+          sha256sum dist/* > dist/SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*

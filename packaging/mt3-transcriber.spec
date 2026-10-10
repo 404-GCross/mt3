@@ -4,7 +4,7 @@ Release: 1%{?dist}
 Summary: MT3 music transcription desktop application
 License: Apache-2.0
 BuildArch: x86_64
-Requires: git, curl, libsndfile, tcl, tk
+Requires: git, curl, libsndfile, libX11, libXext, libXft, fontconfig, libXrender, libXScrnSaver
 Source0: mt3-transcriber.tar.gz
 
 %description
@@ -19,6 +19,9 @@ mkdir -p %{buildroot}%{_prefix}/share/mt3-transcriber
 mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
 cp -a mt3 gui packaging %{buildroot}%{_prefix}/share/mt3-transcriber/
+if [ -d tcltk ]; then
+  cp -a tcltk %{buildroot}%{_prefix}/share/mt3-transcriber/
+fi
 cat > %{buildroot}%{_bindir}/mt3-transcriber <<'EOF'
 #!/usr/bin/env bash
 exec /usr/share/mt3-transcriber/gui/run.sh "$@"

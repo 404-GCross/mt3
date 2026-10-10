@@ -36,7 +36,17 @@ fi
 # 不预先占满显存，避免影响桌面/其他程序。
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
-# uv 提供的 Python 自带 Tcl/Tk；显式指向它的脚本目录，便于配合系统库使用。
+# 优先使用随包安装的、带 Xft 的 Tcl/Tk 脚本目录（deb/rpm 安装到
+# /usr/share/mt3-transcriber/tcltk）；否则退回 uv 自带的脚本目录，配合
+# gui/fix_tk_system.py 换成的系统库使用。
+MT3_TCLTK_DIR="${MT3_TCLTK_DIR:-/usr/share/mt3-transcriber/tcltk}"
+if [ -z "${TCL_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tcl9.0" ]; then
+  export TCL_LIBRARY="$MT3_TCLTK_DIR/lib/tcl9.0"
+fi
+if [ -z "${TK_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tk9.0" ]; then
+  export TK_LIBRARY="$MT3_TCLTK_DIR/lib/tk9.0"
+fi
+
 if [ -z "${TCL_LIBRARY:-}" ] || [ -z "${TK_LIBRARY:-}" ]; then
   read -r TCL_DIR TK_DIR < <("$VENV_DIR/bin/python" - <<'PY'
 import os

@@ -11,6 +11,13 @@ mkdir -p "$PKG/DEBIAN" "$PKG/usr/share/mt3-transcriber" \
   "$PKG/usr/share/applications" "$PKG/usr/bin" \
   "$PKG/usr/share/icons/hicolor/256x256/apps"
 cp -a "$ROOT/mt3" "$ROOT/gui" "$ROOT/packaging" "$PKG/usr/share/mt3-transcriber/"
+# 随包分发带 Xft 的 Tcl/Tk（由 packaging/build-tcltk.sh 生成），修复中文空白。
+TCLTK_DIR="${TCLTK_DIR:-}"
+if [ -n "$TCLTK_DIR" ] && [ -d "$TCLTK_DIR/lib" ]; then
+  cp -a "$TCLTK_DIR" "$PKG/usr/share/mt3-transcriber/tcltk"
+else
+  echo "warning: TCLTK_DIR 未设置；包内将不含 Xft Tcl/Tk，中文可能显示为空白。" >&2
+fi
 find "$PKG" -type d -exec chmod 755 {} +
 cat > "$PKG/usr/bin/mt3-transcriber" <<'EOF'
 #!/usr/bin/env bash
@@ -29,7 +36,7 @@ Architecture: $ARCH
 Maintainer: MT3 Contributors
 Description: MT3 music transcription desktop application
  Audio to MIDI transcription with piano and multi-instrument models.
-Depends: git, curl, ca-certificates, libsndfile1, libtcl8.6, libtk8.6
+Depends: git, curl, ca-certificates, libsndfile1, libx11-6, libxext6, libxft2, libfontconfig1, libxrender1, libxss1
 EOF
 cat > "$PKG/DEBIAN/postinst" <<'EOF'
 #!/usr/bin/env bash

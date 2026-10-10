@@ -174,11 +174,20 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 VENV_PY="$VENV_DIR/bin/python"
 
-# 让 Tk 使用系统自带的（带 Xft/fontconfig 的）Tcl/Tk，否则中文字体显示为空白。
-# 参见 https://github.com/astral-sh/python-build-standalone/issues/740
-log "配置 Tk 字体支持（替换为系统 Tcl/Tk）…"
-"$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
-  || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+# 让 Tk 具备 Xft/fontconfig 支持（uv 自带的 Tcl/Tk 没有），否则中文字体显示为
+# 空白。优先使用随包分发的、我们自己编的 Tcl/Tk；没有时退回系统自带的同版本
+# Tcl/Tk。参见 https://github.com/astral-sh/python-build-standalone/issues/740
+MT3_TCLTK_DIR="${MT3_TCLTK_DIR:-/usr/share/mt3-transcriber/tcltk}"
+if [ -d "$MT3_TCLTK_DIR/lib" ]; then
+  log "配置 Tk 字体支持（内置的 Xft Tcl/Tk）…"
+  "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
+    --source "$MT3_TCLTK_DIR" \
+    || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+else
+  log "配置 Tk 字体支持（替换为系统 Tcl/Tk）…"
+  "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
+    || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+fi
 
 # ---------------------------------------------------------------- 安装依赖
 if [ "$JAX_CUDA" = "cpu" ]; then

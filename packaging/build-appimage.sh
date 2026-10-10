@@ -67,11 +67,22 @@ VENV_PY="$APPDIR/usr/venv/bin/python"
 "$UV_BIN" pip install --python "$VENV_PY" jax
 "$UV_BIN" pip install --python "$VENV_PY" "$SOURCE_DIR"
 
-# 用系统带 Xft 的 Tcl/Tk 覆盖自带版本（AppImage 只读，只能复制而不能符号链接），
-# 否则 Tk 看不到系统字体，中文显示为空白。需要构建机装有 tcl/tk。
-log "内置带 Xft 的系统 Tcl/Tk 与字体栈…"
-"$VENV_PY" "$ROOT/gui/fix_tk_system.py" --python "$VENV_PY" --mode copy \
-  || warn "未内置系统 Tcl/Tk；AppImage 的中文可能显示为空白。"
+# 内置一份带 Xft 的 Tcl/Tk（uv 自带的 Tcl/Tk 未启用 Xft，中文会显示为空白），
+# 并把字体栈依赖一并复制进来，做到目标机零依赖。
+log "内置带 Xft 的 Tcl/Tk（字体支持）…"
+TCLTK_DIR="${TCLTK_DIR:-}"
+if [ -z "$TCLTK_DIR" ] || [ ! -d "$TCLTK_DIR/lib" ]; then
+  TCLTK_DIR="$WORK/tcltk"
+  "$ROOT/packaging/build-tcltk.sh" "$TCLTK_DIR"
+fi
+TCLTK_DEST="$APPDIR/usr/share/mt3-transcriber/tcltk"
+mkdir -p "$(dirname "$TCLTK_DEST")"
+cp -a "$TCLTK_DIR" "$TCLTK_DEST"
+# 用带 Xft 的库覆盖自带的（AppImage 只读，只能复制而不能符号链接）；依赖库
+# （libXft/fontconfig/freetype/...）复制进 tcltk/lib，运行时经 LD_LIBRARY_PATH 找到。
+"$VENV_PY" "$ROOT/gui/fix_tk_system.py" --python "$VENV_PY" \
+  --mode copy --source "$TCLTK_DEST" --deps-dir "$TCLTK_DEST/lib" \
+  || warn "内置 Tcl/Tk 失败；AppImage 的中文可能显示为空白。"
 
 # 内置一款中文字体，这样即使目标机没装任何 CJK 字体也能显示中文。
 log "内置中文字体（Noto Sans CJK）…"
@@ -101,12 +112,23 @@ export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 # 让 fontconfig 扫描包内字体（<XDG_DATA_DIRS>/fonts），缓存写到用户目录。
 export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
-# 包内复制进来的系统 Tcl/Tk 及其字体栈依赖。
+# 包内带 Xft 的 Tcl/Tk 及其字体栈依赖。
+TCLTK_LIB="$HERE/usr/share/mt3-transcriber/tcltk/lib"
+if [ -d "$TCLTK_LIB" ]; then
+  export LD_LIBRARY_PATH="$TCLTK_LIB${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+fi
 for d in "$HERE"/usr/python/*/lib; do
   if [ -d "$d" ]; then
     export LD_LIBRARY_PATH="$d${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   fi
 done
+if [ -z "${TCL_LIBRARY:-}" ] && [ -d "$TCLTK_LIB/tcl9.0" ]; then
+  export TCL_LIBRARY="$TCLTK_LIB/tcl9.0"
+fi
+if [ -z "${TK_LIBRARY:-}" ] && [ -d "$TCLTK_LIB/tk9.0" ]; then
+  export TK_LIBRARY="$TCLTK_LIB/tk9.0"
+fi
+# 兜底：指向自带脚本目录。
 if [ -z "${TCL_LIBRARY:-}" ]; then
   for d in "$HERE"/usr/python/*/lib/tcl8.6 "$HERE"/usr/python/*/lib/tcl9.0; do
     if [ -d "$d" ]; then export TCL_LIBRARY="$d"; break; fi

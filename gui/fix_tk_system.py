@@ -20,19 +20,27 @@ without Xft/fontconfig.  As a result Tk cannot see system fonts, so CJK (and
 other fontconfig) text renders blank -- only the core X fonts are available.
 See https://github.com/astral-sh/python-build-standalone/issues/740.
 
+The replacement libraries come from either:
+
+* a Tcl/Tk prefix we build ourselves (``--source DIR``), which is the reliable
+  path: uv's standalone Python now bundles Tcl/Tk **9.0** (``libtcl9.0.so`` and
+  the upstream Tk-9 name ``libtcl9tk9.0.so``), which most systems do not ship;
+  or
+* the system libraries, matching the bundled major.minor (``--source`` omitted).
+
 Two strategies:
 
 * ``--mode symlink`` (default, for writable installs): replace the bundled
-  ``libtcl*`` / ``libtk*`` with symlinks to the system libraries and relax the
+  ``libtcl*`` / ``libtk*`` with symlinks to the source libraries and relax the
   exact Tcl version check in ``init.tcl``.
-* ``--mode copy`` (for read-only bundles such as an AppImage): copy the system
+* ``--mode copy`` (for read-only bundles such as an AppImage): copy the source
   libraries and their dependencies into the bundle instead, so it stays
   self-contained and does not need Tcl/Tk on the target system.
 
 Usage::
 
     python3 fix_tk_system.py --python /path/to/venv/bin/python
-    python3 fix_tk_system.py --python ... --mode copy
+    python3 fix_tk_system.py --python ... --source /path/to/tcltk --mode copy
     python3 fix_tk_system.py --python ... --reverse
 """
 
@@ -59,11 +67,23 @@ GLIBC_PREFIXES = (
 )
 
 INSTALL_HINTS = {
-    'dnf': 'sudo dnf install tcl tk',
-    'apt': 'sudo apt install libtcl8.6 libtk8.6',
+    'dnf': 'sudo dnf install tcl9 tk9',
+    'apt': 'sudo apt install libtcl9.0 libtk9.0',
     'pacman': 'sudo pacman -S tcl tk',
-    'zypper': 'sudo zypper install tcl tk',
+    'zypper': 'sudo zypper install tcl9 tk9',
 }
+
+
+def map_tk_name(name):
+  """Map a bundled Tk library name to the conventional ``libtk`` name.
+
+  Tk 9 names its shared library ``libtcl9tk9.0.so`` (it encodes the Tcl major
+  version), while distributions ship it as ``libtk9.0.so``.
+  """
+  m = re.match(r'libtcl(\d+)tk(\d+\.\d+)(\.so.*)?$', name)
+  if m:
+    return f'libtk{m.group(2)}.so'
+  return name
 
 
 def python_base_prefix(python):
@@ -80,8 +100,10 @@ def find_system_lib(name):
   """Locate a system library matching ``name`` in the same major.minor series.
 
   Restricting to the same series (e.g. ``libtk8.6``) avoids pairing a Tk 8.6
-  tkinter with a Tk 9.0 shared library.
+  tkinter with a Tk 9.0 shared library.  Tk's bundled name (``libtcl9tk9.0.so``)
+  is normalised to the distribution name (``libtk9.0.so``) first.
   """
+  name = map_tk_name(name)
   match = re.match(r'(lib(?:tcl|tk)(\d+\.\d+))', name)
   if not match:
     return None
@@ -95,6 +117,21 @@ def find_system_lib(name):
     matches = sorted(directory.glob(stem + '*.so*'))
     if matches:
       return matches[0]
+  return None
+
+
+def find_source_lib(name, source):
+  """Locate ``name`` inside a Tcl/Tk prefix we built (``source/lib``)."""
+  lib_dir = source / 'lib'
+  for candidate_name in (name, map_tk_name(name)):
+    exact = lib_dir / candidate_name
+    if exact.exists():
+      return exact
+    match = re.match(r'(lib(?:tcl|tk)\d+\.\d+)', candidate_name)
+    if match:
+      matches = sorted(lib_dir.glob(match.group(1) + '*.so*'))
+      if matches:
+        return matches[0]
   return None
 
 
@@ -162,12 +199,14 @@ def relax_tcl_version(lib_dir, log):
   return changed
 
 
-def process(python, reverse=False, mode='symlink', log=print):
+def process(python, reverse=False, mode='symlink', source=None, deps_dir=None,
+            log=print):
   base = python_base_prefix(python)
   if base is None or not (base / 'lib').is_dir():
     log('[tk] 无法确定 Python 安装目录，跳过。')
     return 0
   lib_dir = base / 'lib'
+  deps_target = Path(deps_dir) if deps_dir else lib_dir
   changed = 0
   for target in (sorted(lib_dir.glob('libtcl*.so*'))
                  + sorted(lib_dir.glob('libtk*.so*'))):
@@ -182,13 +221,17 @@ def process(python, reverse=False, mode='symlink', log=print):
         log(f'[tk] 还原 {target.name}')
         changed += 1
       continue
-    system = find_system_lib(target.name)
-    if system is None:
-      log(f'[tk] 未找到系统库，保留自带版本: {target.name}')
+    if source is not None:
+      replacement = find_source_lib(target.name, Path(source))
+    else:
+      replacement = find_system_lib(target.name)
+    if replacement is None:
+      log(f'[tk] 未找到可替换库，保留自带版本: {target.name}')
       continue
-    swap_library(target, system, mode, log)
+    swap_library(target, replacement, mode, log)
     if mode == 'copy':
-      copy_dependencies(system, lib_dir, log)
+      deps_target.mkdir(parents=True, exist_ok=True)
+      copy_dependencies(replacement, deps_target, log)
     changed += 1
   changed += relax_tcl_version(lib_dir, log)
   return changed
@@ -198,25 +241,35 @@ def install_hint():
   for manager, command in INSTALL_HINTS.items():
     if shutil.which(manager):
       return command
-  return 'install tcl and tk (>= 8.6)'
+  return 'install Tcl/Tk 9.0'
 
 
 def main(argv=None):
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--python', default=sys.executable,
                       help='interpreter whose bundled Tk should be swapped')
+  parser.add_argument('--source', metavar='DIR',
+                      help='Tcl/Tk prefix to copy from (its lib/ dir is used); '
+                           'omit to use the system libraries')
+  parser.add_argument('--deps-dir', metavar='DIR',
+                      help='where to copy shared-library dependencies in copy '
+                           'mode (default: the interpreter lib directory)')
   parser.add_argument('--mode', choices=('symlink', 'copy'), default='symlink',
-                      help='symlink to system libs, or copy them into the bundle')
+                      help='symlink to the libraries, or copy them into the '
+                           'bundle')
   parser.add_argument('--reverse', action='store_true',
                       help='restore the original bundled libraries')
   parser.add_argument('--quiet', action='store_true')
   args = parser.parse_args(argv)
   log = (lambda *_: None) if args.quiet else print
-  changed = process(Path(args.python), reverse=args.reverse,
-                    mode=args.mode, log=log)
+  changed = process(Path(args.python), reverse=args.reverse, mode=args.mode,
+                    source=args.source, deps_dir=args.deps_dir, log=log)
   if changed == 0 and not args.reverse:
-    log('[tk] 未找到可替换的系统 Tcl/Tk 库；中文可能显示为空白。')
-    log('[tk] 请安装后重试: ' + install_hint())
+    log('[tk] 未找到可替换的 Tcl/Tk 库；中文可能显示为空白。')
+    if args.source:
+      log('[tk] 请确认 --source 指向的 Tcl/Tk 前缀包含 lib/libtcl9.0.so。')
+    else:
+      log('[tk] 请安装后重试: ' + install_hint())
   return 0
 
 

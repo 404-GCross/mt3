@@ -26,18 +26,45 @@ jobs:
           python -m compileall -q mt3
           bash -n gui/*.sh packaging/*.sh
 
-  build-deb:
-    name: Build Debian package
+  tcltk:
+    name: Build Xft Tcl/Tk
     needs: checks
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Install Tcl/Tk build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config zlib1g-dev \
+            libx11-dev libxss-dev libxext-dev libxft-dev libfontconfig1-dev \
+            libxrender-dev
+      - name: Build Xft-capable Tcl/Tk
+        run: |
+          ./packaging/build-tcltk.sh "$PWD/.tcltk"
+          tar -czf tcltk-prefix.tar.gz -C .tcltk .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-tcltk-${{ github.sha }}
+          path: tcltk-prefix.tar.gz
+          retention-days: 14
+
+  build-deb:
+    name: Build Debian package
+    needs: [checks, tcltk]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-tcltk-${{ github.sha }}
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y dpkg-dev fakeroot
+      - name: Extract Tcl/Tk
+        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
       - name: Build package
-        run: VERSION=0.0.0 ./packaging/build-deb.sh
+        run: TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-deb.sh
       - name: Inspect package
         run: dpkg-deb --info dist/*.deb
       - uses: actions/upload-artifact@v4
@@ -48,16 +75,21 @@ jobs:
 
   build-rpm:
     name: Build RPM package
-    needs: checks
+    needs: [checks, tcltk]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-tcltk-${{ github.sha }}
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y rpm
+      - name: Extract Tcl/Tk
+        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
       - name: Build package
-        run: VERSION=0.0.0 ./packaging/build-rpm.sh
+        run: TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-rpm.sh
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm-${{ github.sha }}

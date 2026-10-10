@@ -45,12 +45,16 @@ GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
 
 ## 构建 deb / rpm
 
-包只包含 GUI、MT3 源码和启动器，不内置 Python、wheel 或模型权重；首次运行会
-用 `uv` 在用户目录建立私有 3.12 环境，并提示下载模型。
+包包含 GUI、MT3 源码、启动器，以及一份我们自己编译的、带 Xft 的 Tcl/Tk；不内置
+Python、wheel 或模型权重。首次运行会用 `uv` 在用户目录建立私有 3.12 环境，并提示
+下载模型。
+
+先编出 Xft Tcl/Tk（CI 会自动做，并把结果作为 artifact 传给各打包任务）：
 
 ```bash
-VERSION=0.1.0 ./packaging/build-deb.sh
-VERSION=0.1.0 ./packaging/build-rpm.sh   # 在 Fedora/RHEL 环境
+./packaging/build-tcltk.sh .tcltk
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-deb.sh
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-rpm.sh   # 在 Fedora/RHEL 环境
 ```
 
 安装后：
@@ -62,30 +66,39 @@ sudo dnf install ./dist/mt3-transcriber-0.1.0-1.x86_64.rpm
 mt3-transcriber
 ```
 
-依赖仅为 `git`、`curl`、`libsndfile`、`tcl`、`tk`（Python 由 uv 自带）。
+依赖为 `git`、`curl`、`libsndfile` 以及 X11 运行库（`libX11`、`libXext`、`libXft`、
+`fontconfig`、`libXrender`、`libXss`）；Python 由 uv 自带，Tcl/Tk 由包内置。
 
 ## 中文字体 / Tk 显示空白
 
-uv 自带的 Tk 是**不带 Xft/fontconfig** 编译的，因此看不到系统字体，中英文以外
-的文字（如中文）会显示为空白——只剩 ASCII 和 `/`、`:`。这不是缺字体，装
-`google-noto-sans-cjk-fonts` 也没用。
+uv / python-build-standalone 自带的 Tk 是**不带 Xft/fontconfig** 编译的，因此看不到
+系统字体，中文等非 ASCII 文字会显示为空白——只剩 core X 字体（ASCII 和 `/`、`:`）。
+这不是缺字体，装 `google-noto-sans-cjk-fonts` 也没用。而且自带的是 **Tcl/Tk 9.0**
+（库名 `libtcl9.0.so` 与上游 Tk 9 的 `libtcl9tk9.0.so`），多数发行版只提供 8.6，
+无法直接替换。
 
-安装脚本会运行 `gui/fix_tk_system.py`，把 uv 自带的 `libtcl/libtk` 换（符号
-链接）成系统带 Xft 的版本，并放宽 `init.tcl` 的 Tcl 版本校验。需要系统里有
-Tcl/Tk 8.6：
+解决办法是编译一份**启用 Xft 的 Tcl/Tk 9.0** 并随包分发：
 
 ```bash
-sudo dnf install tcl tk            # Fedora
-sudo apt install libtcl8.6 libtk8.6  # Debian/Ubuntu
-sudo pacman -S tcl tk              # Arch
+# 需要: build-essential pkg-config zlib1g-dev libx11-dev libxss-dev libxext-dev \
+#       libxft-dev libfontconfig1-dev libxrender-dev
+./packaging/build-tcltk.sh .tcltk
 ```
+
+`gui/fix_tk_system.py` 会用它覆盖 uv 自带的 `libtcl9.0.so` / `libtcl9tk9.0.so`
+（AppImage 里还会把 `libXft`/fontconfig 等依赖一并复制进包）。安装脚本自动执行：
+
+- deb/rpm：包内附带 `/usr/share/mt3-transcriber/tcltk`，安装时复制进 venv；
+- git 源码安装：若系统已有 Tcl/Tk 9.0 则换成系统的，否则中文可能空白（可先用上面
+  的命令编一份，再用 `--source` 指过去）。
 
 手动修复（安装后随时可跑）：
 
 ```bash
 ~/.local/share/mt3-transcriber/venv/bin/python \
   /usr/share/mt3-transcriber/gui/fix_tk_system.py \
-  --python ~/.local/share/mt3-transcriber/venv/bin/python
+  --python ~/.local/share/mt3-transcriber/venv/bin/python \
+  --mode copy --source /usr/share/mt3-transcriber/tcltk
 ```
 
 还原原状加 `--reverse`。参见 python-build-standalone#740。
@@ -97,12 +110,13 @@ AppImage 内置 Python 3.12 + 程序 + CPU 依赖 + **带 Xft 的 Tcl/Tk + Noto 
 权重首次启动时下载，从而把体积控制在 2GiB 以内，作为 GitHub Release 的单个附件。
 
 ```bash
-VERSION=0.1.0 ./packaging/build-appimage.sh
+./packaging/build-tcltk.sh .tcltk
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-appimage.sh
 # 产物: dist/mt3-transcriber-0.1.0-x86_64.AppImage
 ```
 
-- 构建机需要 `fonts-noto-cjk` 以及系统 Tcl/Tk 8.6（`libtcl8.6 libtk8.6 libxft2
-  libfontconfig1 libfreetype6 libxrender1`）；脚本会把它们复制进包。
+- 构建机需要 `fonts-noto-cjk` 以及 Xft/fontconfig 运行库（`libxft2 libfontconfig1
+  libfreetype6 libxrender1 libx11-6`）；脚本会把它们复制进包。
 - 建议在 `ubuntu:22.04` 等较老的发行版里构建，以获得更宽的 glibc 兼容性；
 - 运行需要 FUSE（Fedora 默认有）；没有时可执行
   `./mt3-transcriber-*.AppImage --appimage-extract-and-run`；
@@ -130,8 +144,9 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`.github/workflows/packages.yml` 会执行静态检查，构建 deb/rpm/AppImage，构建 Docker
-镜像作为验证，并在 tag 触发时上传 GitHub Release 和 SHA256SUMS。
+`.github/workflows/packages.yml` 会执行静态检查，先构建一份带 Xft 的 Tcl/Tk（deb/
+rpm/AppImage 共用），再构建 deb/rpm/AppImage，构建 Docker 镜像作为验证，并在 tag
+触发时上传 GitHub Release 和 SHA256SUMS。
 
 官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行
 `selftest.py`。
