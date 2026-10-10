@@ -70,6 +70,9 @@ fi
 log "编译安装 Tcl ${TCL_VERSION} -> $PREFIX"
 (
   cd "$WORK/tcl${TCL_VERSION}/unix"
+  # Tcl 的 make 会用刚编出的 tclsh 配置 in-tree 包；tclsh 动态链接 libtcl9.0.so，
+  # 需要能从构建目录找到它。
+  export LD_LIBRARY_PATH="$(pwd):$PREFIX/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   ./configure --prefix="$PREFIX" --enable-shared --enable-threads --disable-zipfs
   make -j"$JOBS"
   make install
