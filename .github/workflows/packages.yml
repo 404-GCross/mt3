@@ -160,7 +160,10 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: |
-          rm -f dist/tcltk-prefix.tar.gz   # build input, not a release asset
+          # 随包 Tcl/Tk（带 Xft）也发布出去，方便手动修复已有 venv。
+          if [ -f dist/tcltk-prefix.tar.gz ]; then
+            mv dist/tcltk-prefix.tar.gz dist/mt3-transcriber-tcltk.tar.gz
+          fi
           sha256sum dist/* > dist/SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:

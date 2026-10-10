@@ -92,13 +92,23 @@ uv / python-build-standalone 自带的 Tk 是**不带 Xft/fontconfig** 编译的
 - git 源码安装：若系统已有 Tcl/Tk 9.0 则换成系统的，否则中文可能空白（可先用上面
   的命令编一份，再用 `--source` 指过去）。
 
-手动修复（安装后随时可跑）：
+> **注意**：不要用发行版自带的 Tcl/Tk 去替换。uv 的 `_tkinter` 是连着它自带的
+> Tcl 9.0.x 一起编的，会引用 `TclBN_mp_to_ubin` 之类的符号；Fedora 的
+> `libtcl9tk9.0.so`（libtommath 走系统版）并不导出这些符号，加载时会报
+> `undefined symbol: TclBN_mp_to_ubin`。只有**同源的上游 Tcl/Tk 9.0.x**（也就是
+> 上面这份自编的）才能配得上。Debian/Ubuntu 连 9.0 都没有，更不行。
+
+手动修复（安装后随时可跑）。新版 RPM/AppImage 升级后 `run.sh` 每次启动都会幂等
+校正，一般无需手跑；没有随包 Tcl/Tk 时，可下载 Release 里的
+`mt3-transcriber-tcltk.tar.gz` 解到 `~/.local/share/mt3-transcriber/tcltk`：
 
 ```bash
+mkdir -p ~/.local/share/mt3-transcriber/tcltk
+tar -xzf mt3-transcriber-tcltk.tar.gz -C ~/.local/share/mt3-transcriber/tcltk
 ~/.local/share/mt3-transcriber/venv/bin/python \
   /usr/share/mt3-transcriber/gui/fix_tk_system.py \
   --python ~/.local/share/mt3-transcriber/venv/bin/python \
-  --mode copy --source /usr/share/mt3-transcriber/tcltk
+  --source ~/.local/share/mt3-transcriber/tcltk
 ```
 
 还原原状加 `--reverse`。参见 python-build-standalone#740。

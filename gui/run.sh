@@ -47,6 +47,14 @@ if [ -z "${TK_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tk9.0" ]; then
   export TK_LIBRARY="$MT3_TCLTK_DIR/lib/tk9.0"
 fi
 
+# 随包自带的 Xft Tcl/Tk 存在时，确保 venv 里的库已经指向它。install.sh 只在
+# 首次安装时运行；升级 RPM/AppImage 后旧 venv 仍在，这里每次启动幂等地校正，
+# 免得中文界面又变空白。
+if [ -d "$MT3_TCLTK_DIR/lib" ] && [ -f "$SCRIPT_DIR/fix_tk_system.py" ]; then
+  "$VENV_DIR/bin/python" "$SCRIPT_DIR/fix_tk_system.py" \
+    --python "$VENV_DIR/bin/python" --source "$MT3_TCLTK_DIR" --quiet || true
+fi
+
 if [ -z "${TCL_LIBRARY:-}" ] || [ -z "${TK_LIBRARY:-}" ]; then
   read -r TCL_DIR TK_DIR < <("$VENV_DIR/bin/python" - <<'PY'
 import os

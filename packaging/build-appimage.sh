@@ -109,9 +109,24 @@ cat > "$APPDIR/AppRun" <<'EOF'
 HERE="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 export MT3_CHECKPOINT_DIR="${MT3_CHECKPOINT_DIR:-$HOME/.cache/mt3-transcriber/checkpoints}"
 export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
-# 让 fontconfig 扫描包内字体（<XDG_DATA_DIRS>/fonts），缓存写到用户目录。
+# 让 fontconfig 扫描包内字体。fontconfig 并不读取 XDG_DATA_DIRS，所以还要写一份
+# 配置，把包内的 usr/share/fonts 显式加进去（并沿用系统配置使系统字体仍可用）。
 export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+if [ -z "${FONTCONFIG_FILE:-}" ] && [ -d "$HERE/usr/share/fonts" ]; then
+  font_conf="${XDG_CACHE_HOME}/mt3-transcriber/fonts.conf"
+  mkdir -p "$(dirname "$font_conf")"
+  cat > "$font_conf" <<FC
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <include ignore_missing="yes">/etc/fonts/fonts.conf</include>
+  <dir>${HERE}/usr/share/fonts</dir>
+  <cachedir>${XDG_CACHE_HOME}/fontconfig</cachedir>
+</fontconfig>
+FC
+  export FONTCONFIG_FILE="$font_conf"
+fi
 # 包内带 Xft 的 Tcl/Tk 及其字体栈依赖。
 TCLTK_LIB="$HERE/usr/share/mt3-transcriber/tcltk/lib"
 if [ -d "$TCLTK_LIB" ]; then
