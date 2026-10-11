@@ -16,7 +16,8 @@ JAX_CUDA=cpu ./gui/install.sh
 JAX_CUDA=cuda13 ./gui/install.sh
 ```
 
-模型权重默认**不随包分发**，首次打开界面或转谱时会提示下载（约 340MB）。
+模型权重默认**不随包分发**，首次打开界面或转谱时会提示下载（约 340MB；国内可走镜像，
+见「国内镜像加速」）。
 如需在安装时一并下载：
 
 ```bash
@@ -34,6 +35,45 @@ GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
 > 环境变量：`MT3_HOME` 控制 uv/Python/venv 的安装位置（默认
 > `~/.local/share/mt3-transcriber`）；`MT3_CHECKPOINT_DIR` 控制权重目录
 > （默认 `~/.cache/mt3-transcriber/checkpoints`）。
+
+## 国内镜像加速（可选）
+
+安装时最慢的两段是 GitHub（uv/Python 下载、flax/t5x 等 git 依赖）和 PyPI
+（jax/tensorflow wheel）。设置两个环境变量即可全部走镜像：
+
+```bash
+export MT3_GH_PROXY=https://gh-proxy.com                        # GitHub Releases/Raw/git clone
+export MT3_PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple   # PyPI wheel
+mt3-transcriber
+```
+
+想以后都生效，写进配置文件（每行 `KEY=VALUE`，环境变量优先）：
+
+```bash
+mkdir -p ~/.config/mt3-transcriber
+cat > ~/.config/mt3-transcriber/mirror.conf <<'EOF'
+MT3_GH_PROXY=https://gh-proxy.com
+MT3_PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
+EOF
+```
+
+安装重试顺序为「镜像 → 镜像+HTTP/1.1 → 直连+HTTP/1.1」，镜像抽风时会自动回退。
+安装包本身也可以走代理（把原始 URL 加前缀）：
+
+```bash
+sudo dnf install -y https://gh-proxy.com/https://github.com/404-GCross/mt3/releases/download/v0.1.3/mt3-transcriber-0.1.3-1.x86_64.rpm
+```
+
+模型权重默认从 `storage.googleapis.com` 下载；官方源不可达时会自动改用本仓库
+`checkpoints` Release 的镜像包（每个模型约 164 MiB，同样受 `MT3_GH_PROXY` 加速）：
+
+```bash
+export MT3_CHECKPOINT_SOURCE=mirror          # 跳过官方源，直接用镜像
+export MT3_CHECKPOINT_MIRROR=<base_url>      # 自建镜像：<base_url>/mt3-checkpoints-<model>.tar.gz
+python gui/download_checkpoints.py --source mirror
+```
+
+维护者可用 `Publish checkpoint mirror` workflow 重新生成镜像 Release。
 
 ## 自检
 

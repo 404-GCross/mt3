@@ -1,0 +1,41 @@
+name: Publish checkpoint mirror
+
+# 把公开的 gs://mt3/checkpoints 打包挂到 `checkpoints` Release，供中国大陆等
+# 无法访问 storage.googleapis.com 的用户下载（可再用 gh-proxy 加速）。
+# 只需在权重变化时手动跑一次；应用默认会回退到这个 Release。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download the public checkpoints
+        run: python gui/download_checkpoints.py --dir .checkpoints --source gcs
+      - name: Pack one archive per model
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for model in ismir2021 mt3; do
+            tar -czf "dist/mt3-checkpoints-${model}.tar.gz" -C .checkpoints "$model"
+          done
+          ls -lh dist
+      - name: Publish the checkpoints release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: checkpoints
+          name: MT3 checkpoints mirror
+          body: |
+            MT3 预训练权重镜像（来自公开的 `gs://mt3/checkpoints`，Apache-2.0）。
+
+            应用在官方源不可达时会自动改用这里；国内可用 `MT3_GH_PROXY=https://gh-proxy.com` 加速。
+          files: dist/*.tar.gz
+          make_latest: false

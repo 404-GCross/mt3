@@ -33,6 +33,7 @@ import json
 import os
 import shutil
 import sys
+import tarfile
 import threading
 import time
 import urllib.error
@@ -43,6 +44,48 @@ from pathlib import Path
 BUCKET_API = 'https://storage.googleapis.com/storage/v1/b/mt3/o'
 PUBLIC_BASE = 'https://storage.googleapis.com/mt3/'
 BUCKET_PREFIX = 'checkpoints/'
+
+# 镜像：权重按模型打包挂在 <repo> 的 `checkpoints` Release 上（约 164 MiB/个），
+# 国内可用 gh-proxy 加速；官方 GCS 不可达时自动切换。
+MIRROR_REPO = '404-GCross/mt3'
+MIRROR_TAG = 'checkpoints'
+MIRROR_ASSET = 'mt3-checkpoints-{model}.tar.gz'
+MIRROR_CONF = Path(
+    os.environ.get('XDG_CONFIG_HOME', Path.home() / '.config')) \
+    / 'mt3-transcriber' / 'mirror.conf'
+
+
+def read_mirror_conf():
+  """Read ``KEY=VALUE`` lines from ``~/.config/mt3-transcriber/mirror.conf``."""
+  values = {}
+  try:
+    lines = MIRROR_CONF.read_text(encoding='utf-8').splitlines()
+  except OSError:
+    return values
+  for line in lines:
+    line = line.strip()
+    if not line or line.startswith('#') or '=' not in line:
+      continue
+    key, _, value = line.partition('=')
+    values[key.strip()] = value.strip().strip('"').strip("'")
+  return values
+
+
+def mirror_settings():
+  """Return ``(gh_proxy, checkpoint_mirror)`` from env, then mirror.conf."""
+  conf = read_mirror_conf()
+  proxy = os.environ.get('MT3_GH_PROXY') or conf.get('MT3_GH_PROXY', '')
+  mirror = (os.environ.get('MT3_CHECKPOINT_MIRROR')
+            or conf.get('MT3_CHECKPOINT_MIRROR', ''))
+  return proxy.rstrip('/'), mirror.rstrip('/')
+
+
+def checkpoint_archive_url(model):
+  """URL of the per-model tarball mirror, optionally behind gh-proxy."""
+  proxy, mirror = mirror_settings()
+  base = mirror or f'https://github.com/{MIRROR_REPO}/releases/download/{MIRROR_TAG}'
+  url = f'{base}/{MIRROR_ASSET.format(model=model)}'
+  return f'{proxy}/{url}' if proxy else url
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DEST = Path(
@@ -114,8 +157,8 @@ def human_bytes(num):
     num /= 1024
 
 
-def download_models(dest, models, progress=None):
-  """Download selected models for use by the GUI."""
+def download_models_from_gcs(dest, models, progress=None):
+  """Download selected models from the official Google Cloud bucket."""
   models = list(models)
   jobs = []
   for model in models:
@@ -138,6 +181,122 @@ def download_models(dest, models, progress=None):
       raise RuntimeError(f'模型下载完成但缺少标记文件: {marker}')
 
 
+def download_url(url, target, retries=3):
+  """Download ``url`` to ``target`` (resumes a partial ``.part`` file)."""
+  target = Path(target)
+  target.parent.mkdir(parents=True, exist_ok=True)
+  part = target.with_name(target.name + '.part')
+
+  last_error = None
+  for attempt in range(1, retries + 1):
+    resume_at = part.stat().st_size if part.exists() else 0
+    try:
+      request = urllib.request.Request(url)
+      if resume_at:
+        request.add_header('Range', f'bytes={resume_at}-')
+      with urllib.request.urlopen(request, timeout=120) as response:
+        if resume_at and response.status != 206:
+          resume_at = 0
+        mode = 'ab' if resume_at else 'wb'
+        with open(part, mode) as output:
+          shutil.copyfileobj(response, output, length=256 * 1024)
+      part.replace(target)
+      return target
+    except (urllib.error.URLError, IOError, OSError) as exc:
+      last_error = exc
+      if attempt < retries:
+        time.sleep(2 * attempt)
+  raise RuntimeError(f'下载失败 {url}: {last_error}')
+
+
+def download_models_from_archive(dest, models, progress=None):
+  """Fetch per-model tarballs from the release mirror and extract them."""
+  models = list(models)
+  dest = Path(dest)
+  dest.mkdir(parents=True, exist_ok=True)
+  for index, model in enumerate(models, 1):
+    marker = dest / model / 'checkpoint'
+    if marker.exists():
+      if progress:
+        progress(f'{model}: 已存在，跳过（{index}/{len(models)}）')
+      continue
+    note = f'（{index}/{len(models)}）'
+    if progress:
+      progress(f'下载镜像包: {model} {note} …')
+    archive = dest / f'.{model}.tar.gz'
+    download_url(checkpoint_archive_url(model), archive)
+    if progress:
+      progress(f'解压镜像包: {model} {note} …')
+    with tarfile.open(archive, 'r:gz') as handle:
+      try:
+        handle.extractall(dest, filter='data')
+      except TypeError:  # Python < 3.11.4 没有 filter 参数
+        handle.extractall(dest)
+    archive.unlink(missing_ok=True)
+    if not marker.exists():
+      raise RuntimeError(f'镜像包解压后缺少标记文件: {marker}')
+
+
+def download_models(dest, models, progress=None):
+  """Download selected models for use by the GUI.
+
+  ``MT3_CHECKPOINT_SOURCE=gcs|mirror`` forces one source.  Default is auto:
+  prefer the GitHub mirror when ``MT3_GH_PROXY``/``MT3_CHECKPOINT_MIRROR`` is
+  configured（国内通常已经用它加速），otherwise try the official bucket first
+  and fall back to the mirror.
+  """
+  models = list(models)
+  source = (os.environ.get('MT3_CHECKPOINT_SOURCE') or '').strip().lower()
+  proxy, mirror = mirror_settings()
+
+  def via_gcs():
+    download_models_from_gcs(dest, models, progress)
+
+  def via_archive():
+    download_models_from_archive(dest, models, progress)
+
+  if source == 'gcs':
+    via_gcs()
+    return
+  if source in ('mirror', 'archive', 'github'):
+    via_archive()
+    return
+
+  if mirror or proxy:
+    try:
+      via_archive()
+      return
+    except (urllib.error.URLError, OSError, RuntimeError) as exc:
+      if progress:
+        progress(f'镜像源不可用（{exc}）；改用官方源…')
+  try:
+    via_gcs()
+  except (urllib.error.URLError, OSError, RuntimeError) as exc:
+    if progress:
+      progress(f'官方源不可用（{exc}）；改用 GitHub 镜像…')
+    via_archive()
+
+
+def _download_via_mirror(args, models):
+  """CLI helper: fetch models from the GitHub release mirror."""
+  if args.list:
+    for model in models:
+      print(checkpoint_archive_url(model))
+    return
+  dest = Path(args.dir)
+  print(f'保存到: {dest}\n从 GitHub 镜像下载（每个模型约 164 MiB）…')
+  download_models_from_archive(
+      dest, models, progress=lambda message: print(message))
+  for model in models:
+    marker = dest / model / 'checkpoint'
+    if marker.exists():
+      print(f'✓ {model}: {marker}')
+    else:
+      print(f'✗ {model}: 缺少 {marker}', file=sys.stderr)
+      sys.exit(1)
+  print('全部完成。现在可以运行: python gui/app.py')
+
+
 def main():
   parser = argparse.ArgumentParser(
       description='下载 MT3 预训练 checkpoint（公开 HTTPS，无需 gsutil）')
@@ -149,6 +308,9 @@ def main():
       help=f'要下载的模型，逗号分隔（默认 {",".join(ALL_MODELS)}）')
   parser.add_argument('--jobs', type=int, default=8, help='并行下载数（默认 8）')
   parser.add_argument('--list', action='store_true', help='仅列出远端文件')
+  parser.add_argument(
+      '--source', choices=('auto', 'gcs', 'mirror'), default='auto',
+      help='下载源：auto（默认，官方源失败自动切镜像）/ gcs / mirror')
   args = parser.parse_args()
 
   models = [m.strip() for m in args.models.split(',') if m.strip()]
@@ -157,13 +319,20 @@ def main():
     parser.error(f'未知模型: {", ".join(unknown)}（可选: {", ".join(ALL_MODELS)}）')
 
   jobs = []
+  if args.source == 'mirror':
+    _download_via_mirror(args, models)
+    return
   for model in models:
     prefix = f'{BUCKET_PREFIX}{model}/'
     try:
       objects = list(list_objects(prefix))
     except urllib.error.URLError as exc:
-      print(f'无法访问下载源（需要联网）: {exc}', file=sys.stderr)
-      sys.exit(1)
+      if args.source == 'gcs':
+        print(f'无法访问下载源（需要联网）: {exc}', file=sys.stderr)
+        sys.exit(1)
+      print(f'官方源不可用（{exc}），改用 GitHub 镜像…', file=sys.stderr)
+      _download_via_mirror(args, models)
+      return
     total = sum(size for _, size in objects)
     jobs.extend((name, size) for name, size in objects)
     print(f'{model}: {len(objects)} 个文件, {human_bytes(total)}')

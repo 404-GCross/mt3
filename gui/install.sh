@@ -47,6 +47,41 @@ fetch() {  # fetch URL DEST
   fi
 }
 
+# ---------------------------------------------------------------- 镜像源（可选）
+# 中国大陆加速。可用环境变量，或写进 ~/.config/mt3-transcriber/mirror.conf
+# （每行一个 KEY=VALUE，环境变量优先）：
+#   MT3_GH_PROXY=https://gh-proxy.com                       # GitHub 全走 gh-proxy
+#   MT3_PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple  # PyPI 走国内镜像
+#   MT3_CHECKPOINT_MIRROR=<base_url>                        # 权重镜像（见 download_checkpoints.py）
+mirror_conf="${XDG_CONFIG_HOME:-$HOME/.config}/mt3-transcriber/mirror.conf"
+if [ -f "$mirror_conf" ]; then
+  # shellcheck disable=SC1090
+  . "$mirror_conf"
+fi
+MT3_GH_PROXY="${MT3_GH_PROXY:-}"
+MT3_PIP_INDEX="${MT3_PIP_INDEX:-}"
+
+gh_proxy() {  # gh_proxy URL
+  if [ -n "$MT3_GH_PROXY" ]; then
+    printf '%s/%s\n' "${MT3_GH_PROXY%/}" "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
+export UV_HTTP_TIMEOUT="${UV_HTTP_TIMEOUT:-120}"
+if [ -n "$MT3_GH_PROXY" ]; then
+  log "GitHub 镜像: $MT3_GH_PROXY"
+  : "${UV_PYTHON_INSTALL_MIRROR:=$(gh_proxy https://github.com/astral-sh/python-build-standalone/releases/download)}"
+  export UV_PYTHON_INSTALL_MIRROR
+fi
+if [ -n "$MT3_PIP_INDEX" ]; then
+  log "PyPI 镜像: $MT3_PIP_INDEX"
+  : "${UV_DEFAULT_INDEX:=$MT3_PIP_INDEX}"
+  : "${UV_INDEX_URL:=$MT3_PIP_INDEX}"
+  export UV_DEFAULT_INDEX UV_INDEX_URL
+fi
+
 # ---------------------------------------------------------------- 系统依赖
 # 只补真正缺失的运行时；Python 由 uv 提供，不依赖系统 Python 版本。
 # MT3_SKIP_SYSDEPS=1 可完全跳过系统包检查（依赖已自行装好时使用）。
@@ -146,7 +181,7 @@ if [ ! -x "$UV" ]; then
   esac
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  fetch "https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz" "$tmp/uv.tar.gz"
+  fetch "$(gh_proxy "https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz")" "$tmp/uv.tar.gz"
   tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
   found="$(find "$tmp" -type f -name uv | head -1 || true)"
   [ -n "$found" ] || die "uv 解压失败"
@@ -216,23 +251,50 @@ cp -a "$REPO_DIR/mt3" "$stage/"
 chmod -R u+rwX "$stage" 2>/dev/null || true
 
 # 网络抖动时 uv 拉 git 依赖会失败（例如 HTTP/2 stream not closed cleanly）。
-# 重试 3 次，从第二次起强制 git 走 HTTP/1.1 并加大缓冲。
-install_ok=0
-for attempt in 1 2 3; do
-  if [ "$attempt" -eq 1 ]; then
-    if "$UV" pip install --python "$VENV_PY" "$stage"; then install_ok=1; break; fi
-  else
-    warn "第 $((attempt - 1)) 次安装失败，改用 HTTP/1.1 重试（$attempt/3）…"
-    if GIT_CONFIG_COUNT=2 \
-      GIT_CONFIG_KEY_0=http.version GIT_CONFIG_VALUE_0=HTTP/1.1 \
-      GIT_CONFIG_KEY_1=http.postBuffer GIT_CONFIG_VALUE_1=524288000 \
-      "$UV" pip install --python "$VENV_PY" "$stage"; then
-      install_ok=1
-      break
-    fi
+# 按「镜像 → 镜像+HTTP/1.1 → 直连+HTTP/1.1」重试 3 次。
+run_pip_install() {  # run_pip_install USE_GH_MIRROR USE_HTTP11 USE_PIP_INDEX
+  local use_mirror="$1" use_http11="$2" use_index="$3"
+  local envs=()
+  local count=0
+  if [ "$use_mirror" = 1 ] && [ -n "$MT3_GH_PROXY" ]; then
+    envs+=("GIT_CONFIG_KEY_${count}=url.${MT3_GH_PROXY%/}/https://github.com/.insteadOf")
+    envs+=("GIT_CONFIG_VALUE_${count}=https://github.com/")
+    count=$((count + 1))
   fi
+  if [ "$use_http11" = 1 ]; then
+    envs+=("GIT_CONFIG_KEY_${count}=http.version")
+    envs+=("GIT_CONFIG_VALUE_${count}=HTTP/1.1")
+    count=$((count + 1))
+    envs+=("GIT_CONFIG_KEY_${count}=http.postBuffer")
+    envs+=("GIT_CONFIG_VALUE_${count}=524288000")
+    count=$((count + 1))
+  fi
+  if [ "$use_index" = 0 ]; then
+    envs+=("UV_DEFAULT_INDEX=https://pypi.org/simple")
+    envs+=("UV_INDEX_URL=https://pypi.org/simple")
+  fi
+  if [ "$count" -gt 0 ]; then
+    envs=("GIT_CONFIG_COUNT=$count" "${envs[@]}")
+  fi
+  if [ "${#envs[@]}" -gt 0 ]; then
+    env "${envs[@]}" "$UV" pip install --python "$VENV_PY" "$stage"
+  else
+    "$UV" pip install --python "$VENV_PY" "$stage"
+  fi
+}
+
+install_ok=0
+if run_pip_install 1 0 1; then install_ok=1; fi
+if [ "$install_ok" -eq 0 ]; then
+  warn "安装失败，改用镜像 + HTTP/1.1 重试（2/3）…"
   sleep 5
-done
+  if run_pip_install 1 1 1; then install_ok=1; fi
+fi
+if [ "$install_ok" -eq 0 ]; then
+  warn "仍失败，改用直连 PyPI/GitHub 重试（3/3）…"
+  sleep 5
+  if run_pip_install 0 1 0; then install_ok=1; fi
+fi
 rm -rf "$stage"
 [ "$install_ok" -eq 1 ] \
   || die "依赖安装失败（网络或构建问题）：请检查网络后重新运行 mt3-transcriber。"
