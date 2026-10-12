@@ -122,6 +122,20 @@ jobs:
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
           TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" bash packaging/build-deb.sh
           ls -lh dist/
+      - name: Verify the package ships the offline payload
+        run: |
+          set -euo pipefail
+          listing="$(dpkg-deb -c dist/*.deb)"
+          depends="$(dpkg-deb -f dist/*.deb Depends)"
+          case "$listing" in *runtime.tar.zst*) ;; *) echo "缺少 runtime.tar.zst"; exit 1 ;; esac
+          case "$listing" in *checkpoints/mt3/checkpoint*) ;; *) echo "缺少 mt3 权重"; exit 1 ;; esac
+          case "$listing" in *checkpoints/ismir2021/checkpoint*) ;; *) echo "缺少 ismir2021 权重"; exit 1 ;; esac
+          case "$listing" in *mt3-transcriber/VERSION*) ;; *) echo "缺少 VERSION"; exit 1 ;; esac
+          case "$depends" in *zstd*) ;; *) echo "Depends 缺 zstd"; exit 1 ;; esac
+          # 内置运行时必须是真货（>100MB），不是空壳。
+          size="$(dpkg-deb -c dist/*.deb | awk '/runtime\.tar\.zst$/ {print $3}')"
+          test "${size:-0}" -gt 100000000
+          echo "runtime.tar.zst: $((size / 1024 / 1024)) MiB"
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-deb
@@ -161,14 +175,15 @@ jobs:
         run: |
           set -euo pipefail
           listing="$(rpm -qpl dist/*.rpm)"
-          printf '%s\n' "$listing" | grep -q 'runtime\.tar\.zst$'
-          printf '%s\n' "$listing" | grep -q 'checkpoints/mt3/checkpoint$'
-          printf '%s\n' "$listing" | grep -q 'checkpoints/ismir2021/checkpoint$'
-          printf '%s\n' "$listing" | grep -q '/VERSION$'
-          rpm -qp --requires dist/*.rpm | grep -q '^zstd'
+          requires="$(rpm -qp --requires dist/*.rpm)"
+          case "$listing" in *runtime.tar.zst*) ;; *) echo "缺少 runtime.tar.zst"; exit 1 ;; esac
+          case "$listing" in *checkpoints/mt3/checkpoint*) ;; *) echo "缺少 mt3 权重"; exit 1 ;; esac
+          case "$listing" in *checkpoints/ismir2021/checkpoint*) ;; *) echo "缺少 ismir2021 权重"; exit 1 ;; esac
+          case "$listing" in */VERSION*) ;; *) echo "缺少 VERSION"; exit 1 ;; esac
+          case "$requires" in *zstd*) ;; *) echo "Requires 缺 zstd"; exit 1 ;; esac
           # 内置运行时必须是真货（>100MB），不是空壳。
-          size="$(rpm -qp --qf '[%{FILENAMES}\t%{FILESIZES}\n]' dist/*.rpm \
-            | awk -F'\t' '/runtime\.tar\.zst$/ {print $2}')"
+          size="$(rpm -qp --qf '%{FILESIZES} %{FILENAMES}\n' dist/*.rpm \
+            | awk '$2 ~ /runtime\.tar\.zst$/ {print $1}')"
           test "${size:-0}" -gt 100000000
           echo "runtime.tar.zst: $((size / 1024 / 1024)) MiB"
       - uses: actions/upload-artifact@v4
