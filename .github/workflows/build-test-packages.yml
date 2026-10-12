@@ -40,7 +40,7 @@ jobs:
             libxrender-dev
       - name: Build Xft-capable Tcl/Tk
         run: |
-          ./packaging/build-tcltk.sh "$PWD/.tcltk"
+          bash packaging/build-tcltk.sh "$PWD/.tcltk"
           tar -czf tcltk-prefix.tar.gz -C .tcltk .
       - uses: actions/upload-artifact@v4
         with:
@@ -58,14 +58,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y zstd
-          VERSION=0.0.0 ./packaging/build-runtime.sh
+          VERSION=0.0.0 bash packaging/build-runtime.sh
       - name: Verify the runtime survives a move
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
           mkdir -p "$tmp/home"
           tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
-          ./gui/runtime_repair.sh "$tmp/home"
+          bash gui/runtime_repair.sh "$tmp/home"
           "$tmp/home/venv/bin/python" ./gui/import_check.py
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
@@ -121,7 +121,7 @@ jobs:
         run: |
           RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
-          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-deb.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 bash packaging/build-deb.sh
           ls -lh dist/
       - name: Inspect package
         run: dpkg-deb --info dist/*.deb
@@ -173,7 +173,7 @@ jobs:
         run: |
           RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
-          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-rpm.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 bash packaging/build-rpm.sh
           ls -lh dist/
       - name: Verify the package ships the offline payload
         run: |

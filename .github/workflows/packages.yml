@@ -36,7 +36,7 @@ jobs:
             libxrender-dev
       - name: Build Xft-capable Tcl/Tk
         run: |
-          ./packaging/build-tcltk.sh "$PWD/.tcltk"
+          bash packaging/build-tcltk.sh "$PWD/.tcltk"
           # Record what we built, then package it for the other jobs.
           find .tcltk/lib -maxdepth 1 -name 'libtcl*tk*' -o -maxdepth 1 -name 'libtcl9*'
           tar -czf tcltk-prefix.tar.gz -C .tcltk .
@@ -58,14 +58,14 @@ jobs:
           sudo apt-get install -y zstd
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
-          VERSION="$VERSION" ./packaging/build-runtime.sh
+          VERSION="$VERSION" bash packaging/build-runtime.sh
       - name: Verify the runtime survives a move
         run: |
           set -euo pipefail
           tmp="$(mktemp -d)"
           mkdir -p "$tmp/home"
           tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
-          ./gui/runtime_repair.sh "$tmp/home"
+          bash gui/runtime_repair.sh "$tmp/home"
           "$tmp/home/venv/bin/python" ./gui/import_check.py
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
@@ -120,7 +120,7 @@ jobs:
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
           RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
-          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-deb.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" bash packaging/build-deb.sh
           ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
@@ -155,7 +155,7 @@ jobs:
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
           RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
-          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-rpm.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" bash packaging/build-rpm.sh
           ls -lh dist/
       - name: Verify the package ships the offline payload
         run: |
@@ -197,7 +197,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
-          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-appimage.sh
+          TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" bash packaging/build-appimage.sh
       - name: Smoke test the AppImage dependencies
         run: |
           set -euo pipefail

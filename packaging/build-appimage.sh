@@ -75,7 +75,7 @@ log "内置带 Xft 的 Tcl/Tk（字体支持）…"
 TCLTK_DIR="${TCLTK_DIR:-}"
 if [ -z "$TCLTK_DIR" ] || [ ! -d "$TCLTK_DIR/lib" ]; then
   TCLTK_DIR="$WORK/tcltk"
-  "$ROOT/packaging/build-tcltk.sh" "$TCLTK_DIR"
+  bash "$ROOT/packaging/build-tcltk.sh" "$TCLTK_DIR"
 fi
 TCLTK_DEST="$APPDIR/usr/share/mt3-transcriber/tcltk"
 mkdir -p "$(dirname "$TCLTK_DEST")"

@@ -76,8 +76,8 @@ if [ "${MT3_FORCE_RUNTIME:-0}" = 1 ] || ! runtime_is_current; then
         ;;
     esac
     tar --zstd -xf "$RUNTIME_TAR" -C "$MT3_HOME"
-    if [ -x "$SCRIPT_DIR/runtime_repair.sh" ]; then
-      MT3_HOME="$MT3_HOME" "$SCRIPT_DIR/runtime_repair.sh" "$MT3_HOME" >&2 || true
+    if [ -f "$SCRIPT_DIR/runtime_repair.sh" ]; then
+      MT3_HOME="$MT3_HOME" bash "$SCRIPT_DIR/runtime_repair.sh" "$MT3_HOME" >&2 || true
     fi
     if "$VENV_DIR/bin/python" -c 'import sys' >/dev/null 2>&1; then
       # 记为「本包版本已展开」：同一版本不再重复解压（打包时版本与运行时一致）。
@@ -94,9 +94,9 @@ fi
 
 # 没有可用运行时（源码运行 / 包不完整）：联网安装或修复。
 if [ ! -x "$VENV_DIR/bin/python" ] || [ ! -e "$VENV_DIR/.mt3-installed" ]; then
-  if [ -x "$SCRIPT_DIR/install.sh" ]; then
+  if [ -f "$SCRIPT_DIR/install.sh" ]; then
     echo "正在安装 MT3 环境（需要联网；国内可用 MT3_GH_PROXY / MT3_PIP_INDEX 加速）…" >&2
-    VENV_DIR="$VENV_DIR" MT3_HOME="${MT3_HOME:-}" "$SCRIPT_DIR/install.sh"
+    VENV_DIR="$VENV_DIR" MT3_HOME="${MT3_HOME:-}" bash "$SCRIPT_DIR/install.sh"
   else
     echo "未找到可用的 MT3 环境: $VENV_DIR" >&2
     exit 1
