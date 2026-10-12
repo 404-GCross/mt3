@@ -20,6 +20,13 @@ mkdir -p %{buildroot}%{_prefix}/share/mt3-transcriber
 mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
 cp -a mt3 gui packaging setup.py setup.cfg VERSION %{buildroot}%{_prefix}/share/mt3-transcriber/
+# 离线运行时与模型权重（build-rpm.sh 从 RUNTIME_TARBALL / CHECKPOINTS_DIR 拷进来）。
+if [ -f runtime.tar.zst ]; then
+  cp runtime.tar.zst %{buildroot}%{_prefix}/share/mt3-transcriber/
+fi
+if [ -d checkpoints ]; then
+  cp -a checkpoints %{buildroot}%{_prefix}/share/mt3-transcriber/
+fi
 if [ -d tcltk ]; then
   cp -a tcltk %{buildroot}%{_prefix}/share/mt3-transcriber/
 fi

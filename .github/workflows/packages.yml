@@ -157,6 +157,20 @@ jobs:
           CHECKPOINTS_DIR="$PWD/.checkpoints" \
           TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-rpm.sh
           ls -lh dist/
+      - name: Verify the package ships the offline payload
+        run: |
+          set -euo pipefail
+          listing="$(rpm -qpl dist/*.rpm)"
+          printf '%s\n' "$listing" | grep -q 'runtime\.tar\.zst$'
+          printf '%s\n' "$listing" | grep -q 'checkpoints/mt3/checkpoint$'
+          printf '%s\n' "$listing" | grep -q 'checkpoints/ismir2021/checkpoint$'
+          printf '%s\n' "$listing" | grep -q '/VERSION$'
+          rpm -qp --requires dist/*.rpm | grep -q '^zstd'
+          # 内置运行时必须是真货（>100MB），不是空壳。
+          size="$(rpm -qp --qf '[%{FILENAMES}\t%{FILESIZES}\n]' dist/*.rpm \
+            | awk -F'\t' '/runtime\.tar\.zst$/ {print $2}')"
+          test "${size:-0}" -gt 100000000
+          echo "runtime.tar.zst: $((size / 1024 / 1024)) MiB"
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm
