@@ -66,8 +66,7 @@ jobs:
           mkdir -p "$tmp/home"
           tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
           ./gui/runtime_repair.sh "$tmp/home"
-          "$tmp/home/venv/bin/python" -c \
-            "import jax, tensorflow, t5x, note_seq, librosa; print('relocated runtime OK')"
+          "$tmp/home/venv/bin/python" ./gui/import_check.py
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
         with:

@@ -110,6 +110,12 @@ rm -rf "$RUNTIME_HOME/python/.temp" "$RUNTIME_HOME/python/.lock" \
 # 记下解释器相对位置，run.sh 解压后用它校正 venv（uv 的 venv 存的是构建路径）。
 rel_py="$(cd "$RUNTIME_HOME" && ls -d python/*/bin/python3.12 | head -1 || true)"
 [ -n "$rel_py" ] || die "未找到运行时解释器"
+
+# 自检：把 GUI 用到的依赖都 import 一遍（含 mt3 模块）。
+log "运行时自检…"
+"$VENV_PY" "$ROOT/gui/import_check.py" \
+  || die "运行时依赖不完整，请检查上面的报错。"
+
 printf '%s\n' "$rel_py" > "$VENV_DIR/.mt3-python-relpath"
 printf '%s\n' "$VERSION" > "$VENV_DIR/.mt3-runtime-version"
 touch "$VENV_DIR/.mt3-installed"
@@ -121,18 +127,6 @@ cp "$UV_BIN" "$RUNTIME_HOME/uv/uv"
 chmod 755 "$RUNTIME_HOME/uv/uv"
 printf '%s\n' "$("$UV_BIN" --version 2>/dev/null | awk '{print $2}')" \
   > "$RUNTIME_HOME/uv/VERSION"
-
-log "运行时自检…"
-"$VENV_PY" - <<'PY'
-import jax
-import tensorflow as tf
-import t5x
-import note_seq
-import librosa
-print('  jax devices:', jax.devices())
-print('  tensorflow :', tf.__version__)
-print('  t5x / note_seq / librosa: OK')
-PY
 
 # ---------------------------------------------------------------- 打包
 target="$OUT/mt3-runtime-${VERSION}.tar.zst"

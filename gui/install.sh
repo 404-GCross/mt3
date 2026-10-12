@@ -309,16 +309,8 @@ fi
 
 # ---------------------------------------------------------------- 自检
 log "环境自检…"
-"$VENV_PY" - <<'PY'
-import jax
-import tensorflow as tf
-import t5x
-import note_seq
-import librosa
-print('  jax devices:', jax.devices())
-print('  tensorflow :', tf.__version__)
-print('  t5x / note_seq / librosa: OK')
-PY
+"$VENV_PY" "$SCRIPT_DIR/import_check.py" \
+  || die "依赖不完整（见上面的报错）：请重新运行 mt3-transcriber 修复。"
 touch "$VENV_DIR/.mt3-installed"
 
 log "安装完成。"

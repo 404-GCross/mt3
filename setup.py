@@ -51,6 +51,9 @@ setuptools.setup(
         'seqio @ git+https://github.com/google/seqio#egg=seqio',
         't5',
         't5x @ git+https://github.com/google-research/t5x#egg=t5x',
+        # t5x 的 setup.py 没声明它，但 t5x/checkpoints.py 在 import 时就用到，
+        # 少了会在转谱时 ModuleNotFoundError: No module named 'tensorboard'。
+        'tensorboard',
         'tensorflow',
         'tensorflow-datasets',
     ],

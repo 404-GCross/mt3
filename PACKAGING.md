@@ -77,6 +77,17 @@ python gui/download_checkpoints.py --source mirror
 
 ## 自检
 
+依赖层冒烟测试：把 GUI 需要的依赖（gin/jax/tensorflow/librosa/note_seq/seqio/
+t5/t5x 以及 `mt3` 各模块）全部 import 一遍，缺任何一项都非零退出。安装器、
+`build-runtime.sh`、AppImage 与 Docker 构建都跑它——`t5x` 隐式依赖 `tensorboard`
+这类问题只有真正 import 才会暴露：
+
+```bash
+python gui/import_check.py
+```
+
+端到端自检：
+
 ```bash
 .venv-mt3gui/bin/python gui/selftest.py --model ismir2021
 ```

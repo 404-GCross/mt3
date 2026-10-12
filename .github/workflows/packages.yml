@@ -66,8 +66,7 @@ jobs:
           mkdir -p "$tmp/home"
           tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
           ./gui/runtime_repair.sh "$tmp/home"
-          "$tmp/home/venv/bin/python" -c \
-            "import jax, tensorflow, t5x, note_seq, librosa; print('relocated runtime OK')"
+          "$tmp/home/venv/bin/python" ./gui/import_check.py
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
         with:
@@ -185,6 +184,12 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
           TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-appimage.sh
+      - name: Smoke test the AppImage dependencies
+        run: |
+          set -euo pipefail
+          appdir="$PWD/.appimage/MT3Transcriber.AppDir"
+          "$appdir/usr/venv/bin/python" \
+            "$appdir/usr/share/mt3-transcriber/gui/import_check.py"
       - name: Smoke test CJK fonts in AppImage
         run: |
           set -euo pipefail
