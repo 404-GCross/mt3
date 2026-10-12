@@ -48,53 +48,140 @@ jobs:
           path: tcltk-prefix.tar.gz
           retention-days: 14
 
+  runtime:
+    name: Build offline runtime
+    needs: checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime (Python + CPU deps)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          VERSION=0.0.0 ./packaging/build-runtime.sh
+      - name: Verify the runtime survives a move
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
+          ./gui/runtime_repair.sh "$tmp/home"
+          "$tmp/home/venv/bin/python" -c \
+            "import jax, tensorflow, t5x, note_seq, librosa; print('relocated runtime OK')"
+          rm -rf "$tmp"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-runtime-${{ github.sha }}
+          path: dist/mt3-runtime-*.tar.zst
+          retention-days: 14
+
+  checkpoints:
+    name: Fetch model checkpoints
+    needs: checks
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download checkpoints
+        run: python gui/download_checkpoints.py --dir .checkpoints --source gcs
+      - name: Pack checkpoints
+        run: tar -cf checkpoints.tar -C .checkpoints .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-checkpoints-${{ github.sha }}
+          path: checkpoints.tar
+          retention-days: 14
+
   build-deb:
     name: Build Debian package
-    needs: [checks, tcltk]
+    needs: [checks, tcltk, runtime, checkpoints]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mt3-tcltk-${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-runtime-${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-checkpoints-${{ github.sha }}
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev fakeroot
-      - name: Extract Tcl/Tk
-        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          sudo apt-get install -y dpkg-dev fakeroot zstd
+      - name: Extract Tcl/Tk and checkpoints
+        run: |
+          mkdir -p .tcltk .checkpoints
+          tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          tar -xf checkpoints.tar -C .checkpoints
       - name: Build package
-        run: TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-deb.sh
+        run: |
+          RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
+          CHECKPOINTS_DIR="$PWD/.checkpoints" \
+          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-deb.sh
+          ls -lh dist/
       - name: Inspect package
         run: dpkg-deb --info dist/*.deb
+      - name: Verify the package ships the offline payload
+        run: |
+          set -euo pipefail
+          listing="$(dpkg-deb -c dist/*.deb)"
+          printf '%s\n' "$listing" | grep -q 'runtime\.tar\.zst$'
+          printf '%s\n' "$listing" | grep -q 'checkpoints/mt3/checkpoint$'
+          printf '%s\n' "$listing" | grep -q 'checkpoints/ismir2021/checkpoint$'
+          printf '%s\n' "$listing" | grep -q '\./usr/share/mt3-transcriber/VERSION$'
+          # 内置运行时必须是真货（>100MB），不是空壳。
+          size="$(printf '%s\n' "$listing" | awk '/runtime\.tar\.zst$/ {print $3}')"
+          test "${size:-0}" -gt 100000000
+          echo "runtime.tar.zst: $((size / 1024 / 1024)) MiB"
+          dpkg-deb -f dist/*.deb Depends | tr ',' '\n' | grep -q zstd
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-deb-${{ github.sha }}
           path: dist/*.deb
           retention-days: 14
+          compression-level: 0
 
   build-rpm:
     name: Build RPM package
-    needs: [checks, tcltk]
+    needs: [checks, tcltk, runtime, checkpoints]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mt3-tcltk-${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-runtime-${{ github.sha }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-checkpoints-${{ github.sha }}
       - name: Install packaging tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm
-      - name: Extract Tcl/Tk
-        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          sudo apt-get install -y rpm zstd
+      - name: Extract Tcl/Tk and checkpoints
+        run: |
+          mkdir -p .tcltk .checkpoints
+          tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          tar -xf checkpoints.tar -C .checkpoints
       - name: Build package
-        run: TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-rpm.sh
+        run: |
+          RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
+          CHECKPOINTS_DIR="$PWD/.checkpoints" \
+          TCLTK_DIR="$PWD/.tcltk" VERSION=0.0.0 ./packaging/build-rpm.sh
+          ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm-${{ github.sha }}
           path: dist/*.rpm
           retention-days: 14
+          compression-level: 0
 
   build-docker:
     name: Build Docker image

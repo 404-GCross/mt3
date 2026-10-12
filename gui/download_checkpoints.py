@@ -249,6 +249,19 @@ def download_models(dest, models, progress=None):
   source = (os.environ.get('MT3_CHECKPOINT_SOURCE') or '').strip().lower()
   proxy, mirror = mirror_settings()
 
+  # 随包安装的权重目录是只读的（deb/rpm 内置权重）；里面已有的模型不需要、也不能
+  # 重新下载。
+  dest_path = Path(dest)
+  if dest_path.exists() and not os.access(dest_path, os.W_OK):
+    stale = [m for m in models if not (dest_path / m / 'checkpoint').exists()]
+    if not stale:
+      if progress:
+        progress('模型权重随包安装（只读），无需下载。')
+      return
+    raise RuntimeError(
+        f'权重目录是只读的（{dest_path}），缺少: {", ".join(stale)}；'
+        '请改选一个可写目录再下载。')
+
   def via_gcs():
     download_models_from_gcs(dest, models, progress)
 

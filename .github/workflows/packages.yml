@@ -46,49 +46,123 @@ jobs:
           path: tcltk-prefix.tar.gz
           retention-days: 14
 
+  runtime:
+    # 离线运行时（Python + CPU 依赖）体积大、构建慢，单独跑一次给 deb/rpm 复用。
+    needs: [test]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build offline runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          VERSION="$VERSION" ./packaging/build-runtime.sh
+      - name: Verify the runtime survives a move
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/home"
+          tar --zstd -xf dist/mt3-runtime-*.tar.zst -C "$tmp/home"
+          ./gui/runtime_repair.sh "$tmp/home"
+          "$tmp/home/venv/bin/python" -c \
+            "import jax, tensorflow, t5x, note_seq, librosa; print('relocated runtime OK')"
+          rm -rf "$tmp"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-runtime
+          path: dist/mt3-runtime-*.tar.zst
+          retention-days: 7
+
+  checkpoints:
+    # 模型权重（约 328MB），deb/rpm 内置，装完即可离线使用。
+    needs: [test]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download checkpoints from the public bucket
+        run: python gui/download_checkpoints.py --dir .checkpoints --source gcs
+      - name: Pack checkpoints
+        run: tar -cf checkpoints.tar -C .checkpoints .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-checkpoints
+          path: checkpoints.tar
+          retention-days: 7
+
   deb:
-    needs: [test, tcltk]
+    needs: [test, tcltk, runtime, checkpoints]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mt3-tcltk
-      - name: Extract Tcl/Tk
-        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-runtime
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-checkpoints
+      - name: Extract Tcl/Tk and checkpoints
+        run: |
+          mkdir -p .tcltk .checkpoints
+          tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          tar -xf checkpoints.tar -C .checkpoints
       - name: Build Debian package
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev fakeroot
+          sudo apt-get install -y dpkg-dev fakeroot zstd
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
+          CHECKPOINTS_DIR="$PWD/.checkpoints" \
           TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-deb.sh
+          ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-deb
           path: dist/*.deb
+          compression-level: 0
 
   rpm:
-    needs: [test, tcltk]
+    needs: [test, tcltk, runtime, checkpoints]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: mt3-tcltk
-      - name: Extract Tcl/Tk
-        run: mkdir -p .tcltk && tar -xzf tcltk-prefix.tar.gz -C .tcltk
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-runtime
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-checkpoints
+      - name: Extract Tcl/Tk and checkpoints
+        run: |
+          mkdir -p .tcltk .checkpoints
+          tar -xzf tcltk-prefix.tar.gz -C .tcltk
+          tar -xf checkpoints.tar -C .checkpoints
       - name: Build RPM package
         run: |
           sudo apt-get update
-          sudo apt-get install -y rpm bash coreutils
+          sudo apt-get install -y rpm bash coreutils zstd
           VERSION="${GITHUB_REF_NAME#v}"
           case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          RUNTIME_TARBALL="$PWD/$(ls mt3-runtime*.tar.zst | head -1)" \
+          CHECKPOINTS_DIR="$PWD/.checkpoints" \
           TCLTK_DIR="$PWD/.tcltk" VERSION="$VERSION" ./packaging/build-rpm.sh
+          ls -lh dist/
       - uses: actions/upload-artifact@v4
         with:
           name: mt3-transcriber-rpm
           path: dist/*.rpm
+          compression-level: 0
 
   appimage:
     needs: [test, tcltk]

@@ -83,31 +83,65 @@ python gui/download_checkpoints.py --source mirror
 
 它会生成合成音频并执行完整的音频→MT3→MIDI 流程。自检不代表实际音频准确率。
 
-## 构建 deb / rpm
+## 构建 deb / rpm（离线包，约 1.4GB）
 
-包包含 GUI、MT3 源码、启动器，以及一份我们自己编译的、带 Xft 的 Tcl/Tk；不内置
-Python、wheel 或模型权重。首次运行会用 `uv` 在用户目录建立私有 3.12 环境，并提示
-下载模型。
+包内置**完整的离线运行时 + 两个模型权重**：安装后即可用，不联网、不依赖系统
+Python。
 
-先编出 Xft Tcl/Tk（CI 会自动做，并把结果作为 artifact 传给各打包任务）：
+| 路径 | 内容 | 体积 |
+|---|---|---|
+| `/usr/share/mt3-transcriber/runtime.tar.zst` | Python 3.12 + venv（CPU 版 jax/tensorflow/t5x/...）+ uv | ~1.0GB |
+| `/usr/share/mt3-transcriber/checkpoints/` | mt3 / ismir2021 权重 | 328MB |
+| `/usr/share/mt3-transcriber/tcltk/` | 带 Xft 的 Tcl/Tk（中文界面） | 7MB |
+| `gui/`、`mt3/`、`setup.*`、`VERSION` | 启动脚本、联网安装兜底 | 10MB |
+
+首次启动时 `run.sh` 把运行时解压到 `~/.local/share/mt3-transcriber`（1~2 分钟），
+之后每次直接使用。以下情况会自动重新解压：包内 `VERSION` 与运行时版本戳不一致
+（升级了包）、环境不完整、或设了 `MT3_FORCE_RUNTIME=1`。权重放在只读的
+`/usr/share/mt3-transcriber/checkpoints` 下直接读取，不复制进用户目录。
+
+构建顺序（先 Xft Tcl/Tk，再运行时，最后打包）：
 
 ```bash
 ./packaging/build-tcltk.sh .tcltk
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-deb.sh
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-rpm.sh   # 在 Fedora/RHEL 环境
+VERSION=0.1.4 ./packaging/build-runtime.sh          # → dist/mt3-runtime-0.1.4.tar.zst
+python gui/download_checkpoints.py --dir .checkpoints   # 可选：内置权重
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.4 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.4.tar.zst" \
+  CHECKPOINTS_DIR="$PWD/.checkpoints" \
+  ./packaging/build-deb.sh
+# RPM 同理，需在 Fedora/RHEL 或装了 rpm 的环境：
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.4 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.4.tar.zst" \
+  CHECKPOINTS_DIR="$PWD/.checkpoints" \
+  ./packaging/build-rpm.sh
 ```
 
-安装后：
+`build-runtime.sh` 需要联网装依赖，默认 `JAX_CUDA=cpu`（`cuda12/cuda13` 会让包再大
+3GB+，不建议）。缺 runtime/权重时脚本只告警，退回「首次启动联网安装」的老行为。
+
+安装：
 
 ```bash
-sudo apt install ./dist/mt3-transcriber_0.1.0_amd64.deb
+sudo apt install ./dist/mt3-transcriber_0.1.4_amd64.deb
 # 或
-sudo dnf install ./dist/mt3-transcriber-0.1.0-1.x86_64.rpm
+sudo dnf install ./dist/mt3-transcriber-0.1.4-1.x86_64.rpm
 mt3-transcriber
 ```
 
-依赖为 `git`、`curl`、`libsndfile` 以及 X11 运行库（`libX11`、`libXext`、`libXft`、
-`fontconfig`、`libXrender`、`libXss`）；Python 由 uv 自带，Tcl/Tk 由包内置。
+运行时依赖只有 `zstd` 与 X11/字体运行库（`libsndfile`、`libX11`、`libXext`、
+`libXft`、`fontconfig`、`libXrender`、`libXss`）；`git`/`curl` 只是建议项（联网
+兜底安装时才需要）。Python、Tcl/Tk、模型权重都在包内。
+
+**GPU**：包内是 CPU 版 JAX。装好 NVIDIA 驱动后跑一次
+
+```bash
+/usr/share/mt3-transcriber/gui/install_cuda_jax.sh          # CUDA 12
+JAX_CUDA=cuda13 /usr/share/mt3-transcriber/gui/install_cuda_jax.sh
+```
+
+它用运行时自带的 uv 把 `jax[cuda12]` 装进用户目录的 venv（约 3GB，国内可先配好
+`MT3_PIP_INDEX` 镜像），之后在界面里把「设备」选成 NVIDIA GPU 即可。
 
 ## 中文字体 / Tk 显示空白
 
@@ -170,8 +204,9 @@ TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-appimage.sh
 - 建议在 `ubuntu:22.04` 等较老的发行版里构建，以获得更宽的 glibc 兼容性；
 - 运行需要 FUSE（Fedora 默认有）；没有时可执行
   `./mt3-transcriber-*.AppImage --appimage-extract-and-run`；
-- GPU：包内是 CPU 依赖，使用 GPU 的机器会在首次运行/转谱时按需安装 CUDA 版 JAX
-  （写入用户目录，不改动只读的 AppImage）。
+- GPU：包内是 CPU 依赖，且 AppImage 内的 venv 在只读挂载点上、无法原地换装 CUDA
+  版 JAX。需要 GPU 请用 deb/rpm（`gui/install_cuda_jax.sh`）或 Docker；也可以先
+  `./mt3-transcriber-*.AppImage --appimage-extract` 到可写目录再自行安装。
 - 自检中文渲染：`./mt3-transcriber-*.AppImage --check-fonts`（CI 会用 Xvfb 跑它）。
 
 ## Docker
@@ -194,9 +229,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`.github/workflows/packages.yml` 会执行静态检查，先构建一份带 Xft 的 Tcl/Tk（deb/
-rpm/AppImage 共用），再构建 deb/rpm/AppImage，构建 Docker 镜像作为验证，并在 tag
-触发时上传 GitHub Release 和 SHA256SUMS。
+`.github/workflows/packages.yml` 会执行静态检查，然后并行准备三份共享产物——带
+Xft 的 Tcl/Tk（`tcltk`）、离线运行时（`runtime`，Python + CPU 依赖）、模型权重
+（`checkpoints`）——再据此构建 deb/rpm/AppImage、构建 Docker 镜像作为验证，并在
+tag 触发时上传 GitHub Release 和 SHA256SUMS。`runtime` job 里会另跑一次
+「解压到别的目录再 import」的验证，确保内置运行时换路径后仍可用。
 
 官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行
 `selftest.py`。

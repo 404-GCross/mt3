@@ -4,7 +4,8 @@ Release: 1%{?dist}
 Summary: MT3 music transcription desktop application
 License: Apache-2.0
 BuildArch: x86_64
-Requires: git, curl, libsndfile, libX11, libXext, libXft, fontconfig, libXrender, libXScrnSaver
+Requires: zstd, libsndfile, libX11, libXext, libXft, fontconfig, libXrender, libXScrnSaver
+Recommends: git, curl
 Source0: mt3-transcriber.tar.gz
 
 %description
@@ -18,7 +19,7 @@ rm -rf %{buildroot}
 mkdir -p %{buildroot}%{_prefix}/share/mt3-transcriber
 mkdir -p %{buildroot}%{_bindir} %{buildroot}%{_datadir}/applications
 mkdir -p %{buildroot}%{_datadir}/icons/hicolor/256x256/apps
-cp -a mt3 gui packaging setup.py setup.cfg %{buildroot}%{_prefix}/share/mt3-transcriber/
+cp -a mt3 gui packaging setup.py setup.cfg VERSION %{buildroot}%{_prefix}/share/mt3-transcriber/
 if [ -d tcltk ]; then
   cp -a tcltk %{buildroot}%{_prefix}/share/mt3-transcriber/
 fi
@@ -39,4 +40,5 @@ cp %{buildroot}%{_prefix}/share/mt3-transcriber/packaging/mt3-transcriber.png \
 %{_datadir}/icons/hicolor/256x256/apps/mt3-transcriber.png
 
 %post
-echo "MT3 Transcriber 已安装。首次使用请运行: mt3-transcriber"
+echo "MT3 Transcriber 已安装（含离线运行时与模型权重）。"
+echo "运行 mt3-transcriber 即可使用；首次启动会在 ~/.local/share/mt3-transcriber 展开运行时，不需要联网。"
