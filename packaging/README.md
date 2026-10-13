@@ -11,6 +11,7 @@
 | `build-appimage.sh` | `dist/*.AppImage` | 单文件 AppImage（权重首次启动下载） |
 | `build-macos.sh` | `dist/MT3 Transcriber.app`、`dist/*-arm64.dmg` | macOS（Apple Silicon）自包含应用 |
 | `verify-macos.sh` | — | 验证 macOS 包：拖动后 / 只读卷下的启动与真·转谱 |
+| `check-shell.py` | — | 静态检查脚本里只在 macOS 上炸的写法（CI 用） |
 
 deb/rpm 与 macOS 应用包内置完整的离线运行时与两个模型权重，装好即可离线使用；
 AppImage 只带运行时，权重首次启动时下载（把体积控制在 GitHub Release 的 2GiB

@@ -299,8 +299,9 @@ bash packaging/verify-macos.sh dist/*.dmg   # 验证「拖动后」和「只读�
 
 - **只支持 Apple Silicon（arm64），不支持 Intel Mac**：TensorFlow / jaxlib 的
   macOS 轮子只有 arm64；Rosetta 也只能在 x86 侧跑 x86，无法反向执行 arm64 应用。
-- 系统下限 **macOS 12 (Monterey)**，与 TensorFlow/jaxlib 轮子的 `macosx_12_0`
-  标签一致；`Info.plist` 里写 `LSMinimumSystemVersion=12.0`。
+- 系统下限 **macOS 12 (Monterey)**：TensorFlow 的 macOS 轮子标的是 `macosx_12_0`，
+  jaxlib 是 `macosx_11_0`，两者在 macOS 12 上都能用；`Info.plist` 里写
+  `LSMinimumSystemVersion=12.0`。
 - **纯 CPU 推理**。`jax-metal` 长期停更、算子不全且会算出错误结果，因此不随包
   分发；CPU 上转写一首歌通常需要几分钟。
 - 构建机需要 macOS + Xcode 命令行工具（`xcode-select --install`，提供 clang /
@@ -322,6 +323,11 @@ bash packaging/verify-macos.sh dist/*.dmg   # 验证「拖动后」和「只读�
   `xattr -dr com.apple.quarantine "/Applications/MT3 Transcriber.app"`。
   设了 `APPLE_SIGN_IDENTITY` 时 `build-macos.sh` 会做正式签名（便于后续公证）。
 - App 内自带 uv（`Contents/Resources/runtime/uv/uv`），用户想自行补装依赖时可用。
+- macOS 的 PyPI 上**没有 `tensorflow-cpu` 的轮子**（这个包名只有 Linux/Windows
+  有），而 t5x 依赖它。macOS 版的 `tensorflow` 本身就是 CPU-only、模块完全等价，
+  所以 `build-macos.sh` 先装真的 `tensorflow`，再造一个空的 `tensorflow-cpu`
+  兼容壳（版本号对齐）把依赖解析喂饱；壳里没有任何 tensorflow 模块，
+  `import tensorflow` 仍然解析到真包。
 
 ## Docker
 
@@ -358,7 +364,7 @@ job 里会另跑一次「解压到别的目录再 import」的验证，确保内
 `.github/workflows/build-test-packages.yml` 里的 `build-macos` job 在每次 push 时做
 同样的事（不发布）。
 
-macOS 的包体积：`.dmg` 约 1.0–1.3GB，`app` 解开后约 2.3GB；GitHub Release 单文件
+macOS 的包体积：`.dmg` 实测约 1.5GB，`app` 解开后约 2.3GB；GitHub Release 单文件
 上限 2GiB，`verify-macos.sh` 会检查 dmg 没有超限。
 
 后处理（`gui/midi_rearrange.py`）在多处都会被验证：`test`/`checks` job 里装上
