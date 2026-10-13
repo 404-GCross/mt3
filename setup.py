@@ -42,6 +42,7 @@ setuptools.setup(
         'gin-config',
         'immutabledict',
         'librosa',
+        'mido',
         'mir_eval',
         'note-seq @ git+https://github.com/magenta/note-seq#egg=note_seq',
         'numpy',

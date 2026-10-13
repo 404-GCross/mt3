@@ -17,6 +17,7 @@ def main() -> int:
   import gin  # noqa: F401
   import jax
   import librosa  # noqa: F401
+  import midi_rearrange  # noqa: F401  # 后处理模块（同时验证它依赖的 mido）
   import note_seq  # noqa: F401
   import seqio  # noqa: F401
   import t5  # noqa: F401
@@ -32,7 +33,8 @@ def main() -> int:
 
   print('  jax        :', jax.__version__, jax.devices())
   print('  tensorflow :', tf.__version__)
-  print('  gin / librosa / note_seq / seqio / t5 / t5x: OK')
+  print('  gin / librosa / mido / note_seq / seqio / t5 / t5x: OK')
+  print('  后处理模块 : OK')
   print('  mt3 模块   : OK')
   print('OK: 依赖完整')
   return 0

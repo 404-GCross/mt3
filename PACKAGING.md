@@ -75,10 +75,54 @@ python gui/download_checkpoints.py --source mirror
 
 维护者可用 `Publish checkpoint mirror` workflow 重新生成镜像 Release。
 
+## 后处理（MIDI 整理，可选）
+
+转谱结果可以再做一遍规则化整理（不需要联网、不需要模型），清理模型输出里
+常见的三类毛刺，并把被打碎的重复起音接回去：
+
+| 步骤 | 规则 | 默认 |
+|---|---|---|
+| 删弱音 | 力度 `<= velocity` 的音符整对删除 | 30（0-127） |
+| 删极短音 | 真实音长（按下到抬起）短于 `min_ms` 的音符删除 | 30 ms |
+| 连续消除 | 同音高、与上一次起音间隔 `< repeat_ms` 且力度 `< 2×阈值` 的重复起音合并，并把前一个音的结束延长到后一个音的结束 | 120 ms |
+| 琶音整合 | 同一通道内，起始时间与组内首个起音相距 `<= chord_ms` 的音符吸附到该起音上 | 60 ms |
+
+阈值一律是**毫秒**，内部按文件自身的 tempo map 换算成秒再比较，因此不依赖 ppq
+（MT3 输出是 220，人类钢琴谱常见的 384 也照样跑）。整理结果**永远另存**为
+`xxx.rearranged.mid`，不覆盖原始转谱文件；**默认关闭**。打击乐通道
+（channel 10）默认跳过，可用「包含鼓轨」打开。
+
+界面里在「后处理（MIDI 整理）」区勾选启用（转谱后自动整理），或转谱完成后点
+「整理当前 MIDI…」对已有结果再整理一次（不用重新转谱）。命令行：
+
+```bash
+python gui/app.py --cli 歌曲.mp3 --model ismir2021 --rearrange \
+    --rearrange-velocity 30 --rearrange-min-ms 30 \
+    --rearrange-chord-ms 60 --rearrange-repeat-ms 120
+```
+
+也可以单独整理一个已有 MIDI（只需要 `mido`）：
+
+```bash
+python gui/midi_rearrange.py 转谱.mid --chord-ms 80
+python gui/midi_rearrange.py --selftest      # 合成 MIDI 行为自检，19 项
+```
+
+思路来自 [xRoye/MIDIRearrange](https://github.com/xRoye/MIDIRearrange)，感谢其整理
+思路。该仓库（及其 fork）没有 LICENSE，因此这里是**独立实现**、没有复制其代码，
+并顺手修掉了原版的几个问题：逐音轨逐通道处理（原版只读 `tracks[1]`）、保留
+`program_change` 等非音符事件（原版会丢，导致所有音轨变成默认钢琴音色）、
+`note_off` 使用音符自己的通道（原版硬编码通道 0）、按真实起止算音长、默认跳过
+鼓轨、报告每一步删改了多少音符。
+
+> 注意：整理是**有损**的——会删音符、会把琶音拍平。真人演奏的快速经过音、
+> 装饰音可能被误判成「极短音」，所以默认关闭且永远另存。日志里会报告每一步
+> 改了多少个音符，方便判断阈值是否合适。
+
 ## 自检
 
-依赖层冒烟测试：把 GUI 需要的依赖（gin/jax/tensorflow/librosa/note_seq/seqio/
-t5/t5x 以及 `mt3` 各模块）全部 import 一遍，缺任何一项都非零退出。安装器、
+依赖层冒烟测试：把 GUI 需要的依赖（gin/jax/tensorflow/librosa/mido/note_seq/
+seqio/t5/t5x 以及 `mt3` 各模块）全部 import 一遍，缺任何一项都非零退出。安装器、
 `build-runtime.sh`、AppImage 与 Docker 构建都跑它——`t5x` 隐式依赖 `tensorboard`
 这类问题只有真正 import 才会暴露：
 
@@ -92,7 +136,14 @@ python gui/import_check.py
 .venv-mt3gui/bin/python gui/selftest.py --model ismir2021
 ```
 
-它会生成合成音频并执行完整的音频→MT3→MIDI 流程。自检不代表实际音频准确率。
+它会生成合成音频并执行完整的音频→MT3→MIDI 流程，然后用真实转谱结果跑一遍
+后处理，最后跑合成 MIDI 的整理自检。自检不代表实际音频准确率。
+
+只验后处理（不加载模型、不需要权重）：
+
+```bash
+.venv-mt3gui/bin/python gui/selftest.py --rearrange-only
+```
 
 ## 构建 deb / rpm（离线包，约 1.4GB）
 
@@ -245,6 +296,10 @@ Xft 的 Tcl/Tk（`tcltk`）、离线运行时（`runtime`，Python + CPU 依赖�
 （`checkpoints`）——再据此构建 deb/rpm/AppImage、构建 Docker 镜像作为验证，并在
 tag 触发时上传 GitHub Release 和 SHA256SUMS。`runtime` job 里会另跑一次
 「解压到别的目录再 import」的验证，确保内置运行时换路径后仍可用。
+
+后处理（`gui/midi_rearrange.py`）在两处都会被验证：`test`/`checks` job 里装上
+`mido` 跑一遍合成 MIDI 自检；`runtime` job 里用**解压后的真实运行时**再跑一遍
+（`--selftest`），因此能确认 `mido` 确实随包可用。
 
 官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行
 `selftest.py`。

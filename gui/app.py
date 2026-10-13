@@ -22,6 +22,10 @@ GUI 模式（默认）::
 命令行模式（适合在无显示的服务器上先验证环境）::
 
     python gui/app.py --cli 音频.mp3 -o 输出.mid --model mt3
+
+转谱结果可选做一次「后处理」（规则化 MIDI 整理，见 gui/midi_rearrange.py）::
+
+    python gui/app.py --cli 音频.mp3 --rearrange
 """
 
 from __future__ import annotations
@@ -58,6 +62,25 @@ DEVICE_CHOICES = [
     ('cuda', 'NVIDIA GPU'),
     ('cpu', 'CPU'),
 ]
+
+# 后处理（MIDI 整理）默认值。阈值单位是毫秒，与 ppq/tempo 无关。
+REARRANGE_FIELDS = [
+    ('velocity', '最低力度', '0-127'),
+    ('min_ms', '最低时值', 'ms'),
+    ('chord_ms', '琶音整合', 'ms'),
+    ('repeat_ms', '连续消除', 'ms'),
+]
+
+REARRANGE_DEFAULTS = {
+    'enabled': False,
+    'velocity': 30,
+    'min_ms': 30,
+    'chord_ms': 60,
+    'repeat_ms': 120,
+    'drums': False,
+}
+
+REARRANGE_HINT = '后处理结果另存为 xxx.rearranged.mid，不覆盖原始转谱文件。'
 
 CHECKPOINT_DIR = Path(
     os.environ.get('MT3_CHECKPOINT_DIR', str(REPO_ROOT / 'checkpoints')))
@@ -243,6 +266,7 @@ class Mt3App:
     self.busy = False
     self._prompted_download = False
     self.last_output = None
+    self.last_rearranged = None
     self.config = load_config()
     self.checkpoint_dir = Path(self.config.get('checkpoint_dir', CHECKPOINT_DIR))
 
@@ -259,6 +283,16 @@ class Mt3App:
     self.input_var = tk.StringVar()
     self.output_var = tk.StringVar()
     self.status_var = tk.StringVar(value='就绪')
+
+    # 后处理（MIDI 整理）设置，从上次的配置恢复。
+    self.rearrange_enabled = tk.BooleanVar(value=bool(
+        self.config.get('rearrange_enabled', REARRANGE_DEFAULTS['enabled'])))
+    self.rearrange_drums = tk.BooleanVar(value=bool(
+        self.config.get('rearrange_drums', REARRANGE_DEFAULTS['drums'])))
+    self.rearrange_vars = {}
+    for key, _, _ in REARRANGE_FIELDS:
+      self.rearrange_vars[key] = tk.StringVar(
+          value=str(self.config.get(f'rearrange_{key}', REARRANGE_DEFAULTS[key])))
 
     main = ttk.Frame(root, padding=10)
     main.pack(fill='both', expand=True)
@@ -307,6 +341,39 @@ class Mt3App:
     ttk.Button(main, text='另存为…', command=self.on_browse_output).grid(
         row=row, column=2, sticky='ew')
     row += 1
+
+    post = ttk.LabelFrame(main, text='后处理（MIDI 整理）')
+    post.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(8, 0))
+    row += 1
+
+    head = ttk.Frame(post)
+    head.grid(row=0, column=0, columnspan=4, sticky='w', padx=10, pady=(4, 2))
+    ttk.Checkbutton(head, text='启用（转谱后自动整理）',
+                    variable=self.rearrange_enabled).pack(side='left')
+    ttk.Checkbutton(head, text='包含鼓轨（默认跳过）',
+                    variable=self.rearrange_drums).pack(side='left', padx=(14, 0))
+
+    for index, (key, label, unit) in enumerate(REARRANGE_FIELDS):
+      cell = ttk.Frame(post)
+      cell.grid(row=1, column=index, sticky='w', padx=(10, 10), pady=(0, 2))
+      ttk.Label(cell, text=f'{label}（{unit}）').pack(anchor='w')
+      ttk.Entry(cell, textvariable=self.rearrange_vars[key], width=8).pack(
+          anchor='w')
+
+    actions = ttk.Frame(post)
+    actions.grid(row=2, column=0, columnspan=4, sticky='w', padx=10, pady=(2, 6))
+    ttk.Button(actions, text='恢复默认',
+               command=self.on_reset_rearrange).pack(side='left')
+    self.rearrange_button = ttk.Button(
+        actions, text='整理当前 MIDI…', command=self.on_rearrange_current,
+        state='disabled')
+    self.rearrange_button.pack(side='left', padx=(8, 0))
+    self.open_rearranged_button = ttk.Button(
+        actions, text='打开整理版', command=self.on_open_rearranged,
+        state='disabled')
+    self.open_rearranged_button.pack(side='left', padx=(8, 0))
+    ttk.Label(post, text=REARRANGE_HINT).grid(
+        row=3, column=0, columnspan=4, sticky='w', padx=10, pady=(0, 6))
 
     button_frame = ttk.Frame(main)
     button_frame.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(12, 6))
@@ -384,8 +451,14 @@ class Mt3App:
     except ValueError:
       batch = 8
       self.batch_var.set('8')
-    save_config({'model': self.model_var.get(), 'device': self.device_var.get(),
-                 'batch': batch, 'checkpoint_dir': self.checkpoint_var.get()})
+    values = {'model': self.model_var.get(), 'device': self.device_var.get(),
+              'batch': batch, 'checkpoint_dir': self.checkpoint_var.get(),
+              'rearrange_enabled': bool(self.rearrange_enabled.get()),
+              'rearrange_drums': bool(self.rearrange_drums.get())}
+    for key, value in self.rearrange_params().items():
+      if key != 'drums':
+        values[f'rearrange_{key}'] = value
+    save_config(values)
 
   def on_browse_checkpoint(self):
     path = self.filedialog.askdirectory(title='选择模型权重目录', initialdir=self.checkpoint_var.get())
@@ -455,6 +528,61 @@ class Mt3App:
     if self.last_output and Path(self.last_output).exists():
       open_path(self.last_output)
 
+  # ------------------------------------------------------------------ 后处理
+
+  def rearrange_params(self):
+    """读取后处理参数；非法输入回退到默认值并把界面纠正回合法值。"""
+    limits = {'velocity': (0, 127), 'min_ms': (0, 10000),
+              'chord_ms': (0, 10000), 'repeat_ms': (0, 10000)}
+    values = {}
+    for key, (low, high) in limits.items():
+      try:
+        value = int(float(self.rearrange_vars[key].get().strip()))
+      except ValueError:
+        value = REARRANGE_DEFAULTS[key]
+      value = max(low, min(high, value))
+      self.rearrange_vars[key].set(str(value))
+      values[key] = value
+    values['drums'] = bool(self.rearrange_drums.get())
+    return values
+
+  def on_reset_rearrange(self):
+    for key, _, _ in REARRANGE_FIELDS:
+      self.rearrange_vars[key].set(str(REARRANGE_DEFAULTS[key]))
+    self.rearrange_enabled.set(REARRANGE_DEFAULTS['enabled'])
+    self.rearrange_drums.set(REARRANGE_DEFAULTS['drums'])
+
+  def on_open_rearranged(self):
+    if self.last_rearranged and Path(self.last_rearranged).exists():
+      open_path(self.last_rearranged)
+
+  def on_rearrange_current(self):
+    """对上一次转谱结果再整理一次，不必重新转谱。"""
+    if self.busy:
+      return
+    target = self.last_output or self.output_var.get().strip()
+    if not target or not Path(target).exists():
+      self.messagebox.showerror('错误', '还没有可整理的 MIDI，请先转谱。')
+      return
+    params = self.rearrange_params()
+    self.persist_config()
+    self.busy = True
+    self.rearrange_button.configure(state='disabled')
+    self.set_progress(0, None)
+    self.status_var.set('正在整理 MIDI…')
+    self.log(f'整理: {target}')
+
+    def work():
+      try:
+        import midi_rearrange
+        self.queue.put(('rearrange_done',
+                        midi_rearrange.rearrange_file(target, **params)))
+      except Exception as exc:  # noqa: BLE001 - surfaced to the UI
+        self.queue.put(('error', f'{type(exc).__name__}: {exc}',
+                        traceback.format_exc()))
+
+    threading.Thread(target=work, daemon=True).start()
+
   def on_start(self):
     if self.busy:
       return
@@ -486,6 +614,7 @@ class Mt3App:
     self.start_button.configure(state='disabled')
     self.open_dir_button.configure(state='disabled')
     self.open_midi_button.configure(state='disabled')
+    self.rearrange_button.configure(state='disabled')
     self.set_progress(0, None)
     self.status_var.set('准备中…')
     self.log('=' * 60)
@@ -493,13 +622,22 @@ class Mt3App:
     self.log(f'输入: {audio}')
     self.log(f'输出: {output}')
 
+    # 后处理参数在主线程里读好，再交给工作线程（tk 变量不能跨线程访问）。
+    rearrange_params = None
+    if self.rearrange_enabled.get():
+      rearrange_params = self.rearrange_params()
+      self.log('后处理: 已启用（' + '，'.join(
+          f'{label}={rearrange_params[key]}' for key, label, _ in REARRANGE_FIELDS)
+          + ('，含鼓轨' if rearrange_params['drums'] else '') + '）')
+
     thread = threading.Thread(
-        target=self.worker, args=(audio, output, model_type), daemon=True)
+        target=self.worker, args=(audio, output, model_type, rearrange_params),
+        daemon=True)
     thread.start()
 
   # ------------------------------------------------------------------ 后台线程
 
-  def worker(self, audio, output, model_type):
+  def worker(self, audio, output, model_type, rearrange_params=None):
     q = self.queue
     start = time.time()
     try:
@@ -523,10 +661,20 @@ class Mt3App:
       q.put(('status', '正在写入 MIDI…'))
       backend.save_midi(note_sequence, output)
 
+      rearranged = None
+      if rearrange_params is not None:
+        q.put(('status', '正在整理 MIDI（后处理）…'))
+        try:
+          import midi_rearrange
+        except ImportError as exc:
+          raise RuntimeError(
+              '缺少 mido 依赖，无法做后处理（pip install mido）') from exc
+        rearranged = midi_rearrange.rearrange_file(output, **rearrange_params)
+
       notes = [n for n in note_sequence.notes if not n.is_drum]
       drums = [n for n in note_sequence.notes if n.is_drum]
       elapsed = time.time() - start
-      q.put(('done', output, len(notes), len(drums), elapsed))
+      q.put(('done', output, len(notes), len(drums), elapsed, rearranged))
     except Exception as exc:  # noqa: BLE001 - surfaced to the UI.
       q.put(('error', f'{type(exc).__name__}: {exc}', traceback.format_exc()))
 
@@ -562,11 +710,12 @@ class Mt3App:
       else:
         self.status_var.set(f'正在转谱… 已处理 {done} 个片段')
     elif kind == 'done':
-      _, output, num_notes, num_drums, elapsed = message
+      _, output, num_notes, num_drums, elapsed, rearranged = message
       self.finish()
       self.last_output = output
       self.open_dir_button.configure(state='normal')
       self.open_midi_button.configure(state='normal')
+      self.rearrange_button.configure(state='normal')
       self.status_var.set(f'完成：{num_notes} 个音符')
       if num_drums:
         self.log(f'完成：旋律/和声音符 {num_notes} 个，鼓音符 {num_drums} 个，'
@@ -574,11 +723,28 @@ class Mt3App:
       else:
         self.log(f'完成：{num_notes} 个音符，耗时 {elapsed:.1f} 秒')
       self.log(f'MIDI 已保存: {output}')
+      extra = ''
+      if rearranged is not None:
+        self.last_rearranged = str(rearranged.path)
+        self.open_rearranged_button.configure(state='normal')
+        self.log(f'整理版 MIDI: {rearranged.path}')
+        self.log('后处理：' + rearranged.detail())
+        extra = f'\n\n整理版：\n{rearranged.path}\n{rearranged.summary()}'
       self.messagebox.showinfo(
           '转谱完成',
           f'已生成 MIDI：\n{output}\n\n音符数：{num_notes}'
           f'{" + 鼓 " + str(num_drums) if num_drums else ""}\n'
-          f'耗时：{elapsed:.1f} 秒')
+          f'耗时：{elapsed:.1f} 秒{extra}')
+    elif kind == 'rearrange_done':
+      result = message[1]
+      self.finish()
+      self.last_rearranged = str(result.path)
+      self.open_rearranged_button.configure(state='normal')
+      self.status_var.set('MIDI 整理完成')
+      self.log(f'整理版 MIDI: {result.path}')
+      self.log('后处理：' + result.detail())
+      self.messagebox.showinfo(
+          '整理完成', f'已生成：\n{result.path}\n\n{result.summary()}')
     elif kind == 'error':
       _, summary, details = message
       self.finish()
@@ -594,6 +760,8 @@ class Mt3App:
     self.start_button.configure(state='normal')
     self.progress.stop()
     self.progress.configure(mode='determinate')
+    ready = bool(self.last_output) and Path(self.last_output).exists()
+    self.rearrange_button.configure(state='normal' if ready else 'disabled')
 
   def set_progress(self, done, total):
     if total:
@@ -614,6 +782,27 @@ class Mt3App:
 
   def run(self):
     self.root.mainloop()
+
+
+def cli_rearrange_params(args):
+  """把命令行开关转成 midi_rearrange 的参数。"""
+  return {
+      'velocity': args.rearrange_velocity,
+      'min_ms': args.rearrange_min_ms,
+      'chord_ms': args.rearrange_chord_ms,
+      'repeat_ms': args.rearrange_repeat_ms,
+      'drums': bool(args.rearrange_drums),
+  }
+
+
+def run_rearrange_cli(output, args):
+  """整理一个转谱输出并打印统计（命令行模式）。"""
+  import midi_rearrange
+
+  result = midi_rearrange.rearrange_file(output, **cli_rearrange_params(args))
+  print(f'整理版 MIDI: {result.path}')
+  print('后处理：' + result.detail())
+  return result
 
 
 def run_cli(args):
@@ -647,6 +836,8 @@ def run_cli(args):
         + (f' + {len(drums)} 个鼓音符' if drums else '')
         + f'，耗时 {time.time() - start:.1f} 秒')
   print(f'MIDI 已保存: {output}')
+  if args.rearrange:
+    run_rearrange_cli(output, args)
 
 
 def run_batch(args):
@@ -671,6 +862,8 @@ def run_batch(args):
     ns = transcriber.transcribe_file(audio_path, args.model)
     backend.save_midi(ns, output)
     print(f'  -> {output}')
+    if args.rearrange:
+      run_rearrange_cli(str(output), args)
 
 
 def main():
@@ -694,6 +887,22 @@ def main():
                       help='批量模式输入目录')
   parser.add_argument('--batch-output', metavar='DIR',
                       help='批量模式输出目录')
+  parser.add_argument('--rearrange', action='store_true',
+                      help='转谱后做一次后处理（另存 <输出>.rearranged.mid）')
+  parser.add_argument('--rearrange-velocity', type=int,
+                      default=REARRANGE_DEFAULTS['velocity'], metavar='N',
+                      help=f'后处理：力度阈值，<= 该值的音符删除（默认 {REARRANGE_DEFAULTS["velocity"]}）')
+  parser.add_argument('--rearrange-min-ms', type=int,
+                      default=REARRANGE_DEFAULTS['min_ms'], metavar='MS',
+                      help=f'后处理：最小时值（毫秒，默认 {REARRANGE_DEFAULTS["min_ms"]}）')
+  parser.add_argument('--rearrange-chord-ms', type=int,
+                      default=REARRANGE_DEFAULTS['chord_ms'], metavar='MS',
+                      help=f'后处理：琶音整合窗口（毫秒，默认 {REARRANGE_DEFAULTS["chord_ms"]}）')
+  parser.add_argument('--rearrange-repeat-ms', type=int,
+                      default=REARRANGE_DEFAULTS['repeat_ms'], metavar='MS',
+                      help=f'后处理：连续消除窗口（毫秒，默认 {REARRANGE_DEFAULTS["repeat_ms"]}）')
+  parser.add_argument('--rearrange-drums', action='store_true',
+                      help='后处理：连打击乐通道一起整理（默认跳过）')
   parser.add_argument('--check-fonts', action='store_true',
                       help=argparse.SUPPRESS)
   args = parser.parse_args()

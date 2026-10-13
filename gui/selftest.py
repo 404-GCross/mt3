@@ -20,6 +20,7 @@
     .venv-mt3gui/bin/python gui/selftest.py
 
 用于确认「音频 -> 模型 -> MIDI」整条链路可用，不评估转写准确率。
+末尾还会跑一遍后处理（MIDI 整理）自检，并对真实转谱结果做一次整理。
 """
 
 from __future__ import annotations
@@ -72,8 +73,24 @@ def main():
   parser.add_argument(
       '--model', choices=['ismir2021', 'mt3'], default='ismir2021',
       help='优先使用的模型（缺失时自动回退到另一个）')
+  parser.add_argument(
+      '--rearrange-only', action='store_true',
+      help='只跑后处理（MIDI 整理）自检，不加载模型')
   args = parser.parse_args()
 
+  import midi_rearrange
+
+  if not args.rearrange_only:
+    code = transcribe_selftest(args)
+    if code != 0:
+      return code
+
+  print()
+  print('== 后处理（MIDI 整理）自检 ==')
+  return midi_rearrange.selftest()
+
+
+def transcribe_selftest(args):
   import backend
 
   transcriber = backend.get_transcriber()
@@ -117,6 +134,13 @@ def main():
     return 1
   if num_notes == 0:
     print('提示: 未检测到音符。链路可用，但可换真实钢琴音频再验证。')
+
+  # 用真实转谱结果跑一遍后处理，确认这条路径端到端可用。
+  import midi_rearrange
+
+  result = midi_rearrange.rearrange_file(midi_path)
+  print(f'后处理: {Path(result.path).name}')
+  print('  ' + result.detail())
   print('自检通过')
   return 0
 
