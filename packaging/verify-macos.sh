@@ -85,7 +85,8 @@ log "应用包: $(basename "$app")"
 
 # ---------------------------------------------------------------- 结构
 moved="$work/MT3 Transcriber.app"
-cp -a "$app" "$moved"
+# ditto 是 macOS 上复制 .app 的正确工具（保留符号链接、扩展属性、权限）。
+ditto "$app" "$moved"
 res="$moved/Contents/Resources"
 test -f "$res/VERSION" || die "缺少 VERSION"
 test -f "$res/checkpoints/mt3/checkpoint" || die "缺少 mt3 权重"
@@ -121,9 +122,9 @@ venv_py="$res/runtime/venv/bin/python"
 [ -x "$venv_py" ] || die "包内解释器不可执行: $venv_py"
 
 # ---------------------------------------------------------------- 真·转谱（拖动后）
-# 两秒 440Hz 正弦，用系统 Python 生成（与包内环境无关）。
+# 两秒 440Hz 正弦，用包内解释器生成（纯 stdlib，与依赖无关）。
 wav="$work/tone.wav"
-python3 - "$wav" <<'PY'
+"$venv_py" - "$wav" <<'PY'
 import math, struct, sys, wave
 rate = 16000
 frames = b''.join(

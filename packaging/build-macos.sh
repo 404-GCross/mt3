@@ -91,7 +91,59 @@ VENV_PY="$VENV_DIR/bin/python"
 log "安装 JAX（CPU）…"
 "$UV_BIN" pip install --python "$VENV_PY" jax
 
-log "安装 MT3 及依赖（tensorflow/flax/t5x/seqio/note-seq，约 5~15 分钟）…"
+# t5x 依赖 `tensorflow-cpu`，但 PyPI 上**没有 macOS 的 tensorflow-cpu 轮子**（这个
+# 包名只在 Linux/Windows 上有）。macOS 版的 `tensorflow` 本身就是 CPU-only、模块
+# 完全等价，所以先装真 tensorflow，再装一个空的 `tensorflow-cpu` 兼容壳把依赖解析
+# 喂饱；壳里没有任何 tensorflow 模块，`import tensorflow` 仍然解析到真包。
+log "安装 TensorFlow（CPU）…"
+"$UV_BIN" pip install --python "$VENV_PY" tensorflow
+tf_version="$("$VENV_PY" -c 'import tensorflow; print(tensorflow.__version__)')"
+tf_shim="$WORK/shims/tensorflow_cpu-${tf_version}-py3-none-any.whl"
+
+make_tensorflow_cpu_shim() {  # make_tensorflow_cpu_shim VERSION OUT_WHEEL
+  "$VENV_PY" - "$1" "$2" <<'PY'
+import base64
+import hashlib
+import os
+import sys
+import zipfile
+
+version, out = sys.argv[1], sys.argv[2]
+dist = f'tensorflow_cpu-{version}.dist-info'
+files = [
+    (f'{dist}/METADATA',
+     'Metadata-Version: 2.1\n'
+     'Name: tensorflow-cpu\n'
+     f'Version: {version}\n'
+     'Summary: macOS shim; the macOS "tensorflow" wheel is CPU-only.\n\n'),
+    (f'{dist}/WHEEL',
+     'Wheel-Version: 1.0\n'
+     'Generator: mt3-packaging\n'
+     'Root-Is-Purelib: true\n'
+     'Tag: py3-none-any\n'),
+    ('tensorflow_cpu/__init__.py',
+     '\"\"\"macOS shim: use `tensorflow` (the macOS wheel is CPU-only).\"\"\"\n'),
+]
+record = []
+for name, data in files:
+    digest = base64.urlsafe_b64encode(
+        hashlib.sha256(data.encode()).digest()).rstrip(b'=').decode()
+    record.append(f'{name},sha256={digest},{len(data.encode())}')
+record.append(f'{dist}/RECORD,,')
+
+os.makedirs(os.path.dirname(out), exist_ok=True)
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+    for name, data in files:
+        z.writestr(name, data)
+    z.writestr(f'{dist}/RECORD', '\n'.join(record) + '\n')
+PY
+}
+
+log "安装 tensorflow-cpu 兼容壳（$tf_version）…"
+make_tensorflow_cpu_shim "$tf_version" "$tf_shim"
+"$UV_BIN" pip install --python "$VENV_PY" "$tf_shim"
+
+log "安装 MT3 及依赖（flax/t5x/seqio/note-seq，约 5~15 分钟）…"
 "$UV_BIN" pip install --python "$VENV_PY" "$ROOT"
 # 清掉 setuptools 就地构建的产物。
 rm -rf "$ROOT/build" "$ROOT"/*.egg-info "$ROOT"/mt3/*.egg-info
@@ -228,6 +280,7 @@ cat > "$WORK/launcher.c" <<'C'
 #include <fcntl.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -323,14 +376,23 @@ log "自检（导入 + 后处理）…"
 "$VENV_PY" "$RES/gui/midi_rearrange.py" --selftest
 
 # ---------------------------------------------------------------- 签名（可选）
-# 没有 Apple Developer 账号时只能做 ad-hoc 签名：用户首次打开需要“右键 → 打开”。
+# 没有 Apple Developer 账号时只能做 ad-hoc 签名：用户首次打开仍需「右键 → 打开」。
+# 包内运行时是相对路径、启动时不改包内文件，所以签名不会被运行过程破坏。
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ]; then
   log "签名（$APPLE_SIGN_IDENTITY）…"
   codesign --force --deep --options runtime --timestamp \
     --sign "$APPLE_SIGN_IDENTITY" "$APP" || die "codesign 失败"
+  codesign --verify --deep --strict "$APP" || die "签名校验失败"
 else
-  codesign --force --sign - "$APP" >/dev/null 2>&1 \
-    || warn "ad-hoc 签名失败（不影响本机运行，首次打开需右键 → 打开）。"
+  # 签名不完整（例如某个第三方 .so 没被签过）比不签更糟：Gatekeeper 会报
+  # “已损坏”而不是“未识别开发者”。校验不过就把签名信息去掉。
+  if codesign --force --sign - "$APP" >/dev/null 2>&1 \
+     && codesign --verify --strict "$APP" >/dev/null 2>&1; then
+    log "ad-hoc 签名完成。"
+  else
+    warn "ad-hoc 签名不完整，去掉签名信息（首次打开需右键 → 打开）。"
+    rm -rf "$APP/Contents/_CodeSignature"
+  fi
 fi
 
 # ---------------------------------------------------------------- dmg
