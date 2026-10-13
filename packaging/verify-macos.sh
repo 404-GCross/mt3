@@ -147,8 +147,9 @@ for model in ismir2021 mt3; do
   }
   test -s "$out" || die "没有生成 MIDI: $out"
   test -s "${out%.mid}.rearranged.mid" || die "没有生成整理后的 MIDI"
-  log "  -> $(basename "$out") $(stat -f%z "$out") 字节，整理版 ${
-    stat -f%z "${out%.mid}.rearranged.mid"} 字节"
+  size="$(stat -f%z "$out")"
+  rsize="$(stat -f%z "${out%.mid}.rearranged.mid")"
+  log "  -> $(basename "$out") ${size} 字节，整理版 ${rsize} 字节"
 done
 [ "$(fingerprint "$moved")" = "$before" ] \
   || die "运行后包内文件被改动了（应该一个都不写）"
