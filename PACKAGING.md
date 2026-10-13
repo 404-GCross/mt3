@@ -166,15 +166,15 @@ Python。
 
 ```bash
 ./packaging/build-tcltk.sh .tcltk
-VERSION=0.1.4 ./packaging/build-runtime.sh          # → dist/mt3-runtime-0.1.4.tar.zst
+VERSION=0.1.5 ./packaging/build-runtime.sh          # → dist/mt3-runtime-0.1.5.tar.zst
 python gui/download_checkpoints.py --dir .checkpoints   # 可选：内置权重
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.4 \
-  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.4.tar.zst" \
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.5 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.5.tar.zst" \
   CHECKPOINTS_DIR="$PWD/.checkpoints" \
   ./packaging/build-deb.sh
 # RPM 同理，需在 Fedora/RHEL 或装了 rpm 的环境：
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.4 \
-  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.4.tar.zst" \
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.5 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.5.tar.zst" \
   CHECKPOINTS_DIR="$PWD/.checkpoints" \
   ./packaging/build-rpm.sh
 ```
@@ -185,9 +185,9 @@ TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.4 \
 安装：
 
 ```bash
-sudo apt install ./dist/mt3-transcriber_0.1.4_amd64.deb
+sudo apt install ./dist/mt3-transcriber_0.1.5_amd64.deb
 # 或
-sudo dnf install ./dist/mt3-transcriber-0.1.4-1.x86_64.rpm
+sudo dnf install ./dist/mt3-transcriber-0.1.5-1.x86_64.rpm
 mt3-transcriber
 ```
 
