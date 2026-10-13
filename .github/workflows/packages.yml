@@ -273,9 +273,44 @@ jobs:
           tags: mt3-transcriber:${{ github.sha }}
           push: false
 
+  macos:
+    # macOS（Apple Silicon）应用包：.app + .dmg，包内自带 Python、依赖与两个模型权重。
+    needs: [test, checkpoints]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: mt3-checkpoints
+      - name: Extract checkpoints
+        run: |
+          mkdir -p .checkpoints
+          tar -xf checkpoints.tar -C .checkpoints
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/uv-cache
+          key: uv-macos-${{ hashFiles('setup.py') }}
+      - name: Build MT3 Transcriber.app and the dmg
+        env:
+          UV_CACHE_DIR: ${{ runner.temp }}/uv-cache
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in [0-9]*) ;; *) VERSION="0.0.0" ;; esac
+          VERSION="$VERSION" CHECKPOINTS_DIR="$PWD/.checkpoints" \
+            bash packaging/build-macos.sh
+          ls -lh dist/
+      - name: Verify the bundle (moved app + read-only dmg)
+        run: bash packaging/verify-macos.sh dist/*.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mt3-transcriber-macos
+          path: dist/*.dmg
+          retention-days: 14
+          compression-level: 0
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [deb, rpm, appimage]
+    needs: [deb, rpm, appimage, macos]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v4

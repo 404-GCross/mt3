@@ -16,6 +16,10 @@ JAX_CUDA=cpu ./gui/install.sh
 JAX_CUDA=cuda13 ./gui/install.sh
 ```
 
+在 macOS 上（Linux/macOS 共用这一套脚本）会自动改用 CPU 版 JAX——macOS 没有
+NVIDIA GPU/CUDA，也不使用实验性的 `jax-metal`。macOS 的默认路径见
+「构建 macOS 应用包」一节。
+
 模型权重默认**不随包分发**，首次打开界面或转谱时会提示下载（约 340MB；国内可走镜像，
 见「国内镜像加速」）。
 如需在安装时一并下载：
@@ -24,7 +28,8 @@ JAX_CUDA=cuda13 ./gui/install.sh
 MT3_DOWNLOAD_CHECKPOINTS=1 ./gui/install.sh
 ```
 
-GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
+GUI 中可选择：自动、NVIDIA GPU、CPU（macOS 上只列出「自动（CPU）」与「CPU」）。
+命令行也支持：
 
 ```bash
 ./gui/run.sh --cli song.wav --model ismir2021 --device cuda -o song.mid
@@ -32,9 +37,10 @@ GUI 中可选择：自动、NVIDIA GPU、CPU。命令行也支持：
 ./gui/run.sh --batch-input ./audio --batch-output ./midi --model mt3
 ```
 
-> 环境变量：`MT3_HOME` 控制 uv/Python/venv 的安装位置（默认
-> `~/.local/share/mt3-transcriber`）；`MT3_CHECKPOINT_DIR` 控制权重目录
-> （默认 `~/.cache/mt3-transcriber/checkpoints`）。
+> 环境变量：`MT3_HOME` 控制 uv/Python/venv 的安装位置（Linux 默认
+> `~/.local/share/mt3-transcriber`，macOS 默认 `~/Library/Application Support/mt3-transcriber`）；
+> `MT3_CHECKPOINT_DIR` 控制权重目录（默认 `~/.cache/mt3-transcriber/checkpoints`，
+> macOS 为 `~/Library/Caches/mt3-transcriber/checkpoints`）。
 
 ## 国内镜像加速（可选）
 
@@ -166,15 +172,15 @@ Python。
 
 ```bash
 ./packaging/build-tcltk.sh .tcltk
-VERSION=0.1.5 ./packaging/build-runtime.sh          # → dist/mt3-runtime-0.1.5.tar.zst
+VERSION=0.2.0 ./packaging/build-runtime.sh          # → dist/mt3-runtime-0.2.0.tar.zst
 python gui/download_checkpoints.py --dir .checkpoints   # 可选：内置权重
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.5 \
-  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.5.tar.zst" \
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.2.0 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.2.0.tar.zst" \
   CHECKPOINTS_DIR="$PWD/.checkpoints" \
   ./packaging/build-deb.sh
 # RPM 同理，需在 Fedora/RHEL 或装了 rpm 的环境：
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.5 \
-  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.1.5.tar.zst" \
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.2.0 \
+  RUNTIME_TARBALL="$PWD/dist/mt3-runtime-0.2.0.tar.zst" \
   CHECKPOINTS_DIR="$PWD/.checkpoints" \
   ./packaging/build-rpm.sh
 ```
@@ -185,9 +191,9 @@ TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.5 \
 安装：
 
 ```bash
-sudo apt install ./dist/mt3-transcriber_0.1.5_amd64.deb
+sudo apt install ./dist/mt3-transcriber_0.2.0_amd64.deb
 # 或
-sudo dnf install ./dist/mt3-transcriber-0.1.5-1.x86_64.rpm
+sudo dnf install ./dist/mt3-transcriber-0.2.0-1.x86_64.rpm
 mt3-transcriber
 ```
 
@@ -257,8 +263,8 @@ AppImage 内置 Python 3.12 + 程序 + CPU 依赖 + **带 Xft 的 Tcl/Tk + Noto 
 
 ```bash
 ./packaging/build-tcltk.sh .tcltk
-TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-appimage.sh
-# 产物: dist/mt3-transcriber-0.1.0-x86_64.AppImage
+TCLTK_DIR="$PWD/.tcltk" VERSION=0.2.0 ./packaging/build-appimage.sh
+# 产物: dist/mt3-transcriber-0.2.0-x86_64.AppImage
 ```
 
 - 构建机需要 `fonts-noto-cjk` 以及 Xft/fontconfig 运行库（`libxft2 libfontconfig1
@@ -270,6 +276,52 @@ TCLTK_DIR="$PWD/.tcltk" VERSION=0.1.0 ./packaging/build-appimage.sh
   版 JAX。需要 GPU 请用 deb/rpm（`gui/install_cuda_jax.sh`）或 Docker；也可以先
   `./mt3-transcriber-*.AppImage --appimage-extract` 到可写目录再自行安装。
 - 自检中文渲染：`./mt3-transcriber-*.AppImage --check-fonts`（CI 会用 Xvfb 跑它）。
+
+## 构建 macOS 应用包（Apple Silicon）
+
+`MT3 Transcriber.app` 是自包含应用：包内带独立 Python 3.12 + 依赖 + 两个模型
+权重，双击即用——不需要系统 Python、不需要终端、不需要联网。
+
+| 路径 | 内容 |
+|---|---|
+| `Contents/Resources/runtime/` | Python 3.12 + venv（CPU 版 jax/tensorflow/t5x/…，相对路径、可随包整体搬动）+ uv |
+| `Contents/Resources/checkpoints/` | mt3 / ismir2021 权重 |
+| `Contents/Resources/gui/`、`mt3/`、`setup.*`、`VERSION` | 程序与启动脚本 |
+| `Contents/MacOS/mt3-transcriber` | 启动器（Mach-O，转交 `gui/run.sh`） |
+| `dist/mt3-transcriber-<version>-arm64.dmg` | 分发给用户的磁盘映像（.app + 「应用程序」快捷方式） |
+
+```bash
+python gui/download_checkpoints.py --dir .checkpoints
+VERSION=0.2.0 CHECKPOINTS_DIR="$PWD/.checkpoints" ./packaging/build-macos.sh
+# 产物: dist/MT3 Transcriber.app、dist/mt3-transcriber-0.2.0-arm64.dmg
+bash packaging/verify-macos.sh dist/*.dmg   # 验证「拖动后」和「只读卷」两种启动方式
+```
+
+- **只支持 Apple Silicon（arm64），不支持 Intel Mac**：TensorFlow / jaxlib 的
+  macOS 轮子只有 arm64；Rosetta 也只能在 x86 侧跑 x86，无法反向执行 arm64 应用。
+- 系统下限 **macOS 12 (Monterey)**，与 TensorFlow/jaxlib 轮子的 `macosx_12_0`
+  标签一致；`Info.plist` 里写 `LSMinimumSystemVersion=12.0`。
+- **纯 CPU 推理**。`jax-metal` 长期停更、算子不全且会算出错误结果，因此不随包
+  分发；CPU 上转写一首歌通常需要几分钟。
+- 构建机需要 macOS + Xcode 命令行工具（`xcode-select --install`，提供 clang /
+  sips / iconutil / hdiutil）。推荐用 CI 的 `macos-14` runner。
+- **包内运行时是可搬动的**：`build-macos.sh` 把 venv 的 `pyvenv.cfg`（`home`）与
+  `bin/python*` 都改写成**相对路径**，所以用户把 `.app` 拖到哪、甚至直接从挂载的
+  `.dmg` 里启动，包内解释器都能自己找到 `Contents/Resources/runtime/python`。
+  运行时不需要解压、不需要复制、也不需要校正——启动时**不写包内任何文件**
+  （`PYTHONDONTWRITEBYTECODE=1`，字节码在构建时已预编译），因此将来做签名/公证也
+  不会有「应用改自己导致签名失效」的问题。
+- macOS 上的路径：配置在 `~/.config/mt3-transcriber/config.json`（遵循
+  `XDG_CONFIG_HOME`），权重下载的兜底目录在 `~/Library/Caches/mt3-transcriber`，
+  日志（Finder 启动时没有终端可看）在 `~/Library/Logs/mt3-transcriber.log`。
+- 中文字体用系统自带的苹方/黑体（macOS 上 Tk 走 CoreText），不需要 Xft 版
+  Tcl/Tk，也不需要 `gui/fix_tk_system.py`。
+- 未公证的应用首次打开会被 Gatekeeper 拦一次，需要告诉用户：
+  macOS 12–14 用「右键 → 打开 → 打开」；macOS 15+ 在「系统设置 → 隐私与安全性」
+  里点「仍要打开」；或者执行
+  `xattr -dr com.apple.quarantine "/Applications/MT3 Transcriber.app"`。
+  设了 `APPLE_SIGN_IDENTITY` 时 `build-macos.sh` 会做正式签名（便于后续公证）。
+- App 内自带 uv（`Contents/Resources/runtime/uv/uv`），用户想自行补装依赖时可用。
 
 ## Docker
 
@@ -287,19 +339,32 @@ Docker 镜像适合 GPU 主机和 CLI；桌面 GUI 还需要正确配置 X11/Way
 推送版本标签即可构建并发布：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 `.github/workflows/packages.yml` 会执行静态检查，然后并行准备三份共享产物——带
 Xft 的 Tcl/Tk（`tcltk`）、离线运行时（`runtime`，Python + CPU 依赖）、模型权重
-（`checkpoints`）——再据此构建 deb/rpm/AppImage、构建 Docker 镜像作为验证，并在
-tag 触发时上传 GitHub Release 和 SHA256SUMS。`runtime` job 里会另跑一次
-「解压到别的目录再 import」的验证，确保内置运行时换路径后仍可用。
+（`checkpoints`）——再据此构建 deb/rpm/AppImage 与 macOS 的 `.app`/`.dmg`、构建
+Docker 镜像作为验证，并在 tag 触发时上传 GitHub Release 和 SHA256SUMS。`runtime`
+job 里会另跑一次「解压到别的目录再 import」的验证，确保内置运行时换路径后仍可用。
 
-后处理（`gui/midi_rearrange.py`）在两处都会被验证：`test`/`checks` job 里装上
+`macos` job（`macos-14`，arm64）会完整跑一遍 `packaging/build-macos.sh`，再用
+`packaging/verify-macos.sh dist/*.dmg` 验证：先检查包结构（Mach-O 启动器、有效签名、
+`LSMinimumSystemVersion`、venv 的相对路径、gin 配置与权重），再把 `.app` 复制到别处
+（模拟用户拖到「应用程序」）用包内启动器真跑两次转谱（`ismir2021` 与 `mt3`，含后处理）、
+确认包内文件一个都没被改动、跑后处理与端到端自检、做一次 Tk 冒烟测试，最后挂载 dmg
+**从只读卷直接启动并转谱**，确认既不复制运行时也不写任何文件。
+`.github/workflows/build-test-packages.yml` 里的 `build-macos` job 在每次 push 时做
+同样的事（不发布）。
+
+macOS 的包体积：`.dmg` 约 1.0–1.3GB，`app` 解开后约 2.3GB；GitHub Release 单文件
+上限 2GiB，`verify-macos.sh` 会检查 dmg 没有超限。
+
+后处理（`gui/midi_rearrange.py`）在多处都会被验证：`test`/`checks` job 里装上
 `mido` 跑一遍合成 MIDI 自检；`runtime` job 里用**解压后的真实运行时**再跑一遍
-（`--selftest`），因此能确认 `mido` 确实随包可用。
+（`--selftest`）；macOS 构建里也会跑一遍（`build-macos.sh` 与 `verify-macos.sh`），
+因此能确认 `mido` 确实随包可用。
 
 官方 GitHub Runner 没有 NVIDIA GPU，因此 GPU 推理仍需在目标 GPU 机器上执行
 `selftest.py`。

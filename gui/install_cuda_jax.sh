@@ -23,6 +23,10 @@ log() { printf '\033[1;32m[cuda]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[cuda]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[cuda]\033[0m %s\n' "$*" >&2; exit 1; }
 
+if [ "$(uname -s)" = "Darwin" ]; then
+  die "macOS 没有 NVIDIA GPU/CUDA：包内已经是 CPU 版 JAX，直接使用即可。"
+fi
+
 [ -x "$VENV_DIR/bin/python" ] || die "未找到 MT3 环境: $VENV_DIR（先运行 mt3-transcriber）"
 if ! command -v nvidia-smi >/dev/null 2>&1; then
   warn "未检测到 nvidia-smi；没有 NVIDIA 驱动时装了 CUDA 版 JAX 也只能用 CPU。"

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import functools
 import os
+import sys
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -369,6 +370,8 @@ def configure_device(device='auto'):
   """
   if device not in ('auto', 'cpu', 'cuda'):
     raise ValueError(f'unknown device: {device}')
+  if device == 'cuda' and sys.platform == 'darwin':
+    raise RuntimeError('macOS 没有 NVIDIA GPU/CUDA，请把设备切换为“自动/CPU”。')
   if device == 'auto':
     return
   platform = 'cpu' if device == 'cpu' else 'cuda'

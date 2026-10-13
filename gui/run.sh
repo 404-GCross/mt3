@@ -9,6 +9,10 @@
 # deb/rpm 包内置了离线运行时（runtime.tar.zst）与模型权重：首次启动解压到
 # ~/.local/share/mt3-transcriber，之后完全离线。源码目录运行时若没有内置运行时，
 # 则退回 gui/install.sh 联网安装。
+#
+# macOS 的 MT3 Transcriber.app 把运行时与权重直接放在包内
+# （Contents/Resources/），不需要解压，也不需要改动包内文件：包内 venv 用的是
+# 相对路径，因此随便拖到哪、甚至从只读的 .dmg 里直接启动都能用。
 
 set -euo pipefail
 
@@ -16,13 +20,36 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 VENV_DIR="${VENV_DIR:-$REPO_DIR/.venv-mt3gui}"
 
+IS_DARWIN=0
+[ "$(uname -s)" = "Darwin" ] && IS_DARWIN=1
+
 INSTALLED=0
 [ "$SCRIPT_DIR" = "/usr/share/mt3-transcriber/gui" ] && INSTALLED=1
 
-# 内置运行时 / 用户目录 只对包安装（或显式指定运行时包）生效。
+# macOS 应用包：gui/ 位于 MT3 Transcriber.app/Contents/Resources/gui。
+APP_RES=""
+case "$SCRIPT_DIR" in
+  */Contents/Resources/gui) APP_RES="${SCRIPT_DIR%/gui}" ;;
+esac
+[ -n "$APP_RES" ] && INSTALLED=1
+
+# 可写目录：MT3_USER_HOME 是 deb/rpm 展开运行时的位置；MT3_USER_CACHE 是权重下载
+# 的兜底位置（包内权重缺失或不可写时用）。macOS 用系统惯例的路径。
+if [ "$IS_DARWIN" = 1 ]; then
+  MT3_USER_HOME="${MT3_USER_HOME:-$HOME/Library/Application Support/mt3-transcriber}"
+  MT3_USER_CACHE="${MT3_USER_CACHE:-$HOME/Library/Caches/mt3-transcriber}"
+else
+  MT3_USER_HOME="${MT3_USER_HOME:-$HOME/.local/share/mt3-transcriber}"
+  MT3_USER_CACHE="${MT3_USER_CACHE:-$HOME/.cache/mt3-transcriber}"
+fi
+
 RUNTIME_TAR="${MT3_RUNTIME_TARBALL:-}"
-if [ "$INSTALLED" = 1 ] || [ -n "$RUNTIME_TAR" ]; then
-  MT3_HOME="${MT3_HOME:-$HOME/.local/share/mt3-transcriber}"
+if [ -n "$APP_RES" ]; then
+  # .app 自带运行时：原地使用，不解压。
+  MT3_HOME="${MT3_HOME:-$APP_RES/runtime}"
+  VENV_DIR="${MT3_VENV_DIR:-$MT3_HOME/venv}"
+elif [ "$INSTALLED" = 1 ] || [ -n "$RUNTIME_TAR" ]; then
+  MT3_HOME="${MT3_HOME:-$MT3_USER_HOME}"
   # deb/rpm 把运行时放在 /usr/share/mt3-transcriber/runtime.tar.zst（gui/ 的上一级）。
   if [ -z "$RUNTIME_TAR" ]; then
     RUNTIME_TAR="$REPO_DIR/runtime.tar.zst"
@@ -50,6 +77,17 @@ runtime_is_current() {
   fi
   return 0
 }
+
+# .app 自带的运行时：就地使用，不需要解压，也不需要改动包内文件。
+# packaging/build-macos.sh 把 venv 的 pyvenv.cfg home 与 bin/python 都写成了相对
+# 路径，所以 .app 被拖到哪、甚至直接从只读的 .dmg 里启动，解释器都能自己找到
+# 包内的 Python。运行时不写包内任何东西（PYTHONDONTWRITEBYTECODE，见下），
+# 因此也可以安全地签名/公证。
+if [ -n "$APP_RES" ]; then
+  # 不写 __pycache__：只读卷上写不了，签名过的包也不该被改动（字节码已在构建
+  # 时预编译好，直接命中缓存）。
+  export PYTHONDONTWRITEBYTECODE=1
+fi
 
 if [ "${MT3_FORCE_RUNTIME:-0}" = 1 ] || ! runtime_is_current; then
   if [ -f "$RUNTIME_TAR" ]; then
@@ -94,6 +132,12 @@ fi
 
 # 没有可用运行时（源码运行 / 包不完整）：联网安装或修复。
 if [ ! -x "$VENV_DIR/bin/python" ] || [ ! -e "$VENV_DIR/.mt3-installed" ]; then
+  if [ -n "$APP_RES" ]; then
+    # .app 里一切都是自带的，走到这里说明包本身坏了：重新装一份，别在包内搞半成品。
+    echo "应用包内的运行时不可用: $VENV_DIR" >&2
+    echo "请重新下载安装 MT3 Transcriber.app。" >&2
+    exit 1
+  fi
   if [ -f "$SCRIPT_DIR/install.sh" ]; then
     echo "正在安装 MT3 环境（需要联网；国内可用 MT3_GH_PROXY / MT3_PIP_INDEX 加速）…" >&2
     VENV_DIR="$VENV_DIR" MT3_HOME="${MT3_HOME:-}" bash "$SCRIPT_DIR/install.sh"
@@ -106,12 +150,16 @@ fi
 
 # 内置模型权重（只读）优先；用户显式指定 MT3_CHECKPOINT_DIR 时尊重用户选择。
 if [ "$INSTALLED" = 1 ] && [ -z "${MT3_CHECKPOINT_DIR:-}" ]; then
-  sys_ckpt="/usr/share/mt3-transcriber/checkpoints"
+  if [ -n "$APP_RES" ]; then
+    sys_ckpt="$APP_RES/checkpoints"
+  else
+    sys_ckpt="/usr/share/mt3-transcriber/checkpoints"
+  fi
   # 只有在两个模型都随包内置时才用它（只读）；缺任何一个都退回可写的用户目录。
   if [ -f "$sys_ckpt/mt3/checkpoint" ] && [ -f "$sys_ckpt/ismir2021/checkpoint" ]; then
     export MT3_CHECKPOINT_DIR="$sys_ckpt"
   else
-    export MT3_CHECKPOINT_DIR="$HOME/.cache/mt3-transcriber/checkpoints"
+    export MT3_CHECKPOINT_DIR="$MT3_USER_CACHE/checkpoints"
   fi
 elif [ -n "${MT3_CHECKPOINT_DIR:-}" ]; then
   export MT3_CHECKPOINT_DIR
@@ -122,21 +170,24 @@ export XLA_PYTHON_CLIENT_PREALLOCATE="${XLA_PYTHON_CLIENT_PREALLOCATE:-false}"
 
 # 优先使用随包安装的、带 Xft 的 Tcl/Tk 脚本目录（deb/rpm 安装到
 # /usr/share/mt3-transcriber/tcltk）；否则退回 uv 自带的脚本目录，配合
-# gui/fix_tk_system.py 换成的系统库使用。
+# gui/fix_tk_system.py 换成的系统库使用。macOS 上的 Tk 是原生 Aqua + CoreText，
+# 中文直接可用，不需要这套 Xft 修补。
 MT3_TCLTK_DIR="${MT3_TCLTK_DIR:-/usr/share/mt3-transcriber/tcltk}"
-if [ -z "${TCL_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tcl9.0" ]; then
-  export TCL_LIBRARY="$MT3_TCLTK_DIR/lib/tcl9.0"
-fi
-if [ -z "${TK_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tk9.0" ]; then
-  export TK_LIBRARY="$MT3_TCLTK_DIR/lib/tk9.0"
-fi
+if [ "$IS_DARWIN" = 0 ]; then
+  if [ -z "${TCL_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tcl9.0" ]; then
+    export TCL_LIBRARY="$MT3_TCLTK_DIR/lib/tcl9.0"
+  fi
+  if [ -z "${TK_LIBRARY:-}" ] && [ -d "$MT3_TCLTK_DIR/lib/tk9.0" ]; then
+    export TK_LIBRARY="$MT3_TCLTK_DIR/lib/tk9.0"
+  fi
 
-# 随包自带的 Xft Tcl/Tk 存在时，确保 venv 里的库已经指向它。install.sh 只在
-# 首次安装时运行，升级 RPM/AppImage 或重新展开运行时后这里每次启动幂等地校正，
-# 免得中文界面又变空白。
-if [ -d "$MT3_TCLTK_DIR/lib" ] && [ -f "$SCRIPT_DIR/fix_tk_system.py" ]; then
-  "$VENV_DIR/bin/python" "$SCRIPT_DIR/fix_tk_system.py" \
-    --python "$VENV_DIR/bin/python" --source "$MT3_TCLTK_DIR" --quiet || true
+  # 随包自带的 Xft Tcl/Tk 存在时，确保 venv 里的库已经指向它。install.sh 只在
+  # 首次安装时运行，升级 RPM/AppImage 或重新展开运行时后这里每次启动幂等地校正，
+  # 免得中文界面又变空白。
+  if [ -d "$MT3_TCLTK_DIR/lib" ] && [ -f "$SCRIPT_DIR/fix_tk_system.py" ]; then
+    "$VENV_DIR/bin/python" "$SCRIPT_DIR/fix_tk_system.py" \
+      --python "$VENV_DIR/bin/python" --source "$MT3_TCLTK_DIR" --quiet || true
+  fi
 fi
 
 if [ -z "${TCL_LIBRARY:-}" ] || [ -z "${TK_LIBRARY:-}" ]; then

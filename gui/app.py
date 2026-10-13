@@ -57,11 +57,18 @@ MODEL_CHOICES = [
     ('mt3', '多乐器（MT3：钢琴/吉他/贝斯/鼓等）'),
 ]
 
-DEVICE_CHOICES = [
-    ('auto', '自动（优先 NVIDIA GPU）'),
-    ('cuda', 'NVIDIA GPU'),
-    ('cpu', 'CPU'),
-]
+if sys.platform.startswith('darwin'):
+  # macOS 上没有 NVIDIA GPU/CUDA，JAX 走 CPU（不随包分发实验性的 jax-metal）。
+  DEVICE_CHOICES = [
+      ('auto', '自动（CPU）'),
+      ('cpu', 'CPU'),
+  ]
+else:
+  DEVICE_CHOICES = [
+      ('auto', '自动（优先 NVIDIA GPU）'),
+      ('cuda', 'NVIDIA GPU'),
+      ('cpu', 'CPU'),
+  ]
 
 # 后处理（MIDI 整理）默认值。阈值单位是毫秒，与 ppq/tempo 无关。
 REARRANGE_FIELDS = [
@@ -254,7 +261,7 @@ def check_fonts():
 class Mt3App:
   """Tkinter desktop UI."""
 
-  def __init__(self):
+  def __init__(self, initial_file=None):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
 
@@ -277,7 +284,11 @@ class Mt3App:
     root.minsize(640, 460)
 
     self.model_var = tk.StringVar(value=self.config.get('model', 'mt3'))
-    self.device_var = tk.StringVar(value=self.config.get('device', 'auto'))
+    # 配置里可能是别的平台留下的设备（例如 macOS 上的 cuda），回退到 auto。
+    device = self.config.get('device', 'auto')
+    if device not in [value for value, _ in DEVICE_CHOICES]:
+      device = 'auto'
+    self.device_var = tk.StringVar(value=device)
     self.batch_var = tk.StringVar(value=str(self.config.get('batch', 8)))
     self.checkpoint_var = tk.StringVar(value=str(self.checkpoint_dir))
     self.input_var = tk.StringVar()
@@ -412,6 +423,13 @@ class Mt3App:
     self.log_text.configure(yscrollcommand=scrollbar.set)
 
     self.input_var.trace_add('write', self.on_input_changed)
+    if initial_file:
+      # 从文件管理器双击音频、拖到图标上，或命令行给了音频路径时预选它。
+      path = Path(initial_file)
+      if path.exists():
+        self.input_var.set(str(path))
+      else:
+        self.log(f'忽略不存在的音频文件: {initial_file}')
 
     self.refresh_model_status()
     if missing_checkpoints(self.checkpoint_dir):
@@ -428,14 +446,19 @@ class Mt3App:
 
   def warn_missing_cjk_font(self):
     """Tell the user to install a CJK font when Chinese text stays blank."""
+    if sys.platform.startswith('darwin'):
+      hint = ('  系统自带苹方/黑体，若缺失可在“系统设置 → 通用 → 语言与地区”'
+              '里重新安装中文语言支持。\n\n')
+    else:
+      hint = ('  Fedora:  sudo dnf install google-noto-sans-cjk-fonts\n'
+              '  Debian:  sudo apt install fonts-noto-cjk\n'
+              '  Arch:    sudo pacman -S noto-fonts-cjk\n'
+              '  openSUSE: sudo zypper install noto-sans-cjk-fonts\n\n')
     self.messagebox.showwarning(
         '缺少中文字体 / Missing CJK font',
         '未找到可用的中文字体，界面里中文可能显示为空白。\n\n'
         '请安装任一中文字体后重新打开：\n'
-        '  Fedora:  sudo dnf install google-noto-sans-cjk-fonts\n'
-        '  Debian:  sudo apt install fonts-noto-cjk\n'
-        '  Arch:    sudo pacman -S noto-fonts-cjk\n'
-        '  openSUSE: sudo zypper install noto-sans-cjk-fonts\n\n'
+        + hint +
         'No CJK font found; Chinese labels may be blank.')
 
   def refresh_model_status(self):
@@ -874,6 +897,9 @@ def main():
   parser.add_argument(
       '--cli', metavar='音频文件',
       help='命令行模式：转写指定音频文件（无界面）')
+  parser.add_argument(
+      'audio', nargs='*',
+      help='音频文件：图形界面启动时预选它（双击音频/拖到图标上时由系统传入）')
   parser.add_argument('-o', '--output', help='输出 MIDI 路径（默认同名 .mid）')
   parser.add_argument(
       '--model', choices=[m for m, _ in MODEL_CHOICES], default='mt3',
@@ -911,6 +937,9 @@ def main():
   if args.check_fonts:
     sys.exit(check_fonts())
 
+  if args.audio and args.cli:
+    parser.error('音频文件请只给一次：位置参数（图形界面预选）或 --cli（命令行模式）')
+
   if args.batch_input:
     if not args.batch_output:
       parser.error('--batch-input 必须同时指定 --batch-output')
@@ -924,12 +953,18 @@ def main():
 
   if importlib.util.find_spec('tkinter') is None:
     print('未安装 Tkinter，无法启动图形界面。', file=sys.stderr)
-    print('Debian/Ubuntu: sudo apt install python3-tk', file=sys.stderr)
-    print('Fedora:        sudo dnf install python3-tkinter', file=sys.stderr)
+    if sys.platform.startswith('darwin'):
+      print('macOS: 请使用随包分发的 MT3 Transcriber.app（内置 Tk）。', file=sys.stderr)
+    else:
+      print('Debian/Ubuntu: sudo apt install python3-tk', file=sys.stderr)
+      print('Fedora:        sudo dnf install python3-tkinter', file=sys.stderr)
     print('或使用命令行模式: python gui/app.py --cli 音频.mp3', file=sys.stderr)
     sys.exit(1)
 
-  Mt3App().run()
+  if len(args.audio) > 1:
+    print(f'（一次只预选一个文件，已忽略其余 {len(args.audio) - 1} 个）',
+          file=sys.stderr)
+  Mt3App(initial_file=args.audio[0] if args.audio else None).run()
 
 
 if __name__ == '__main__':

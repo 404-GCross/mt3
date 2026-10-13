@@ -7,3 +7,9 @@ dist/
 .package/
 .rpmbuild/
 .appimage/
+.macos/
+.runtime/
+.checkpoints/
+.tcltk/
+build/
+*.egg-info/

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# MT3 扒谱工具 - 目标机安装脚本（Linux）
+# MT3 扒谱工具 - 目标机安装脚本（Linux / macOS）
 #
 # 自带 Python：使用独立的 uv 自动安装 Python 3.12 并在私有虚拟环境里装依赖，
 # 因此不依赖发行版自带的 Python 版本（例如 Fedora 44 的系统 Python 3.14 也能用）。
 #
 # 用法:
-#   ./gui/install.sh                              # 默认按 CUDA 12 安装 JAX
+#   ./gui/install.sh                              # 默认按 CUDA 12 安装 JAX（macOS 上为 CPU）
 #   JAX_CUDA=cuda13 ./gui/install.sh              # 新驱动/新 CUDA
 #   JAX_CUDA=cpu ./gui/install.sh                 # 纯 CPU
 #   MT3_DOWNLOAD_CHECKPOINTS=1 ./gui/install.sh   # 同时下载模型权重（约 340MB）
@@ -16,14 +16,21 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
+OS="$(uname -s)"
 
 PYTHON_VERSION="3.12"
 JAX_CUDA="${JAX_CUDA:-cuda12}"
-MT3_HOME="${MT3_HOME:-$HOME/.local/share/mt3-transcriber}"
+if [ "$OS" = "Darwin" ]; then
+  MT3_HOME="${MT3_HOME:-$HOME/Library/Application Support/mt3-transcriber}"
+  MT3_CACHE="${MT3_CACHE:-$HOME/Library/Caches/mt3-transcriber}"
+else
+  MT3_HOME="${MT3_HOME:-$HOME/.local/share/mt3-transcriber}"
+  MT3_CACHE="${MT3_CACHE:-$HOME/.cache/mt3-transcriber}"
+fi
 
 if [ "$SCRIPT_DIR" = "/usr/share/mt3-transcriber/gui" ]; then
   VENV_DIR="${VENV_DIR:-$MT3_HOME/venv}"
-  export MT3_CHECKPOINT_DIR="${MT3_CHECKPOINT_DIR:-$HOME/.cache/mt3-transcriber/checkpoints}"
+  export MT3_CHECKPOINT_DIR="${MT3_CHECKPOINT_DIR:-$MT3_CACHE/checkpoints}"
 else
   VENV_DIR="${VENV_DIR:-$REPO_DIR/.venv-mt3gui}"
 fi
@@ -108,6 +115,9 @@ if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && [ "${#missing[@]}" -gt 0 ]; then
   pkgs=()
   for item in "${missing[@]}"; do pkgs+=("$(pkg_name "$item")"); done
   warn "缺少系统包: ${pkgs[*]}"
+  if [ "$OS" = "Darwin" ]; then
+    die "请先安装 Xcode 命令行工具（提供 git）: xcode-select --install"
+  fi
   pm=""
   for candidate in apt-get dnf pacman zypper; do
     if command -v "$candidate" >/dev/null 2>&1; then pm="$candidate"; break; fi
@@ -161,7 +171,10 @@ if [ "${MT3_SKIP_SYSDEPS:-0}" != "1" ] && command -v fc-list >/dev/null 2>&1; th
   fi
 fi
 
-if command -v nvidia-smi >/dev/null 2>&1; then
+if [ "$OS" = "Darwin" ]; then
+  # macOS 上没有 NVIDIA GPU/CUDA；JAX 走 CPU（jax-metal 不随包分发）。
+  log "macOS：使用 CPU 推理。"
+elif command -v nvidia-smi >/dev/null 2>&1; then
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 || true)"
   log "检测到 GPU: ${gpu_name:-未知}"
 else
@@ -174,10 +187,11 @@ UV="$(command -v uv || true)"
 if [ ! -x "$UV" ]; then
   mkdir -p "$UV_DIR"
   log "下载 uv（独立的 Python 安装器）…"
-  case "$(uname -m)" in
-    x86_64|amd64) uv_arch="x86_64-unknown-linux-gnu" ;;
-    aarch64|arm64) uv_arch="aarch64-unknown-linux-gnu" ;;
-    *) die "暂不支持的 CPU 架构: $(uname -m)" ;;
+  case "$OS:$(uname -m)" in
+    Linux:x86_64|Linux:amd64) uv_arch="x86_64-unknown-linux-gnu" ;;
+    Linux:aarch64|Linux:arm64) uv_arch="aarch64-unknown-linux-gnu" ;;
+    Darwin:arm64|Darwin:aarch64) uv_arch="aarch64-apple-darwin" ;;
+    *) die "暂不支持的 CPU 架构: $OS $(uname -m)" ;;
   esac
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
@@ -214,20 +228,27 @@ rm -f "$VENV_DIR/.mt3-installed"
 # 让 Tk 具备 Xft/fontconfig 支持（uv 自带的 Tcl/Tk 没有），否则中文字体显示为
 # 空白。优先使用随包分发的、我们自己编的 Tcl/Tk；没有时退回系统自带的同版本
 # Tcl/Tk。参见 https://github.com/astral-sh/python-build-standalone/issues/740
-MT3_TCLTK_DIR="${MT3_TCLTK_DIR:-/usr/share/mt3-transcriber/tcltk}"
-if [ -d "$MT3_TCLTK_DIR/lib" ]; then
-  log "配置 Tk 字体支持（内置的 Xft Tcl/Tk）…"
-  "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
-    --source "$MT3_TCLTK_DIR" \
-    || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+# macOS 的 Tk 是原生 Aqua + CoreText，中文直接可用，不需要这套修补。
+if [ "$OS" = "Darwin" ]; then
+  log "macOS：Tk 使用原生字体渲染，跳过 Xft 配置。"
 else
-  log "配置 Tk 字体支持（替换为系统 Tcl/Tk）…"
-  "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
-    || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+  MT3_TCLTK_DIR="${MT3_TCLTK_DIR:-/usr/share/mt3-transcriber/tcltk}"
+  if [ -d "$MT3_TCLTK_DIR/lib" ]; then
+    log "配置 Tk 字体支持（内置的 Xft Tcl/Tk）…"
+    "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
+      --source "$MT3_TCLTK_DIR" \
+      || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+  else
+    log "配置 Tk 字体支持（替换为系统 Tcl/Tk）…"
+    "$VENV_PY" "$SCRIPT_DIR/fix_tk_system.py" --python "$VENV_PY" \
+      || warn "Tk 字体配置失败；中英文界面仍可用，但中文可能显示为空白。"
+  fi
 fi
 
 # ---------------------------------------------------------------- 安装依赖
-if [ "$JAX_CUDA" = "cpu" ]; then
+if [ "$JAX_CUDA" = "cpu" ] || [ "$OS" = "Darwin" ]; then
+  [ "$OS" = "Darwin" ] && [ "$JAX_CUDA" != "cpu" ] \
+    && warn "macOS 上没有 CUDA，改用 CPU 版 JAX（忽略 JAX_CUDA=$JAX_CUDA）。"
   log "安装 JAX（CPU）…"
   "$UV" pip install --python "$VENV_PY" jax
 else

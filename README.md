@@ -8,12 +8,13 @@ This is not an officially supported Google product.
 
 本仓库在 MT3 之上做了一层 Tkinter 图形界面与可分发的安装包：双击运行、不需要
 终端、不需要系统 Python（自带 Python 3.12 运行时），支持钢琴模型（`ismir2021`）
-与多乐器模型（`mt3`），可选 NVIDIA GPU 加速。
+与多乐器模型（`mt3`）。Linux 上可选 NVIDIA GPU 加速；macOS 为 Apple Silicon
+（arm64）纯 CPU 版。
 
 转谱结果还可以做一次可选的**后处理（MIDI 整理）**：删弱音、删极短音、合并琶音
 与重复起音，另存为 `xxx.rearranged.mid`（默认关闭、不覆盖原始结果）。
 
-安装包（deb / rpm / AppImage / Docker）、镜像加速与构建说明见
+安装包（deb / rpm / AppImage / Docker / macOS .dmg）、镜像加速与构建说明见
 [PACKAGING.md](PACKAGING.md)。
 
 ## Transcribe your own audio

@@ -1,8 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=MT3 Transcriber
+Name[zh_CN]=MT3 扒谱
 Comment=AI music transcription to MIDI
-Exec=mt3-transcriber
+Comment[zh_CN]=把音频转写成 MIDI（钢琴 / 多乐器）
+Exec=mt3-transcriber %F
 Icon=mt3-transcriber
 Terminal=false
 Categories=AudioVideo;Audio;Music;
+MimeType=audio/mpeg;audio/x-wav;audio/wav;audio/flac;audio/x-flac;audio/ogg;audio/mp4;audio/x-m4a;audio/aac;audio/x-aiff;audio/x-ms-wma;
