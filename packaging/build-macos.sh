@@ -72,7 +72,7 @@ if [ -z "$UV_BIN" ]; then
 fi
 log "uv: $UV_BIN ($("$UV_BIN" --version))"
 
-mkdir -p "$RES/MacOS" "$OUT"
+mkdir -p "$APP/Contents/MacOS" "$OUT"
 
 export UV_PYTHON_INSTALL_DIR="$RT/python"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-$WORK/uv-cache}"
