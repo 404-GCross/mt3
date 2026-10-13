@@ -39,7 +39,7 @@ show_log() {
 
 [ "$(uname -s)" = "Darwin" ] || die "只能在 macOS 上验证（当前: $(uname -s)）"
 
-work="$(mktemp -d)"
+work="$(mktemp -d "${TMPDIR:-/tmp}/mt3-verify.XXXXXX")"
 mounted=""
 cleanup() {
   if [ -n "$mounted" ]; then
@@ -68,7 +68,7 @@ case "$target" in
     [ "$size" -gt 300000000 ] || die "dmg 太小，里面大概没装东西"
     mountpoint="$work/vol"
     mkdir -p "$mountpoint"
-    log "挂载 $target（只读）"
+    log "挂载 ${target}（只读）"
     hdiutil attach "$target" -nobrowse -readonly -mountpoint "$mountpoint" >/dev/null
     mounted="$mountpoint"
     app="$(ls -d "$mountpoint"/*.app 2>/dev/null | head -1 || true)"
@@ -140,10 +140,10 @@ PY
 before="$(fingerprint "$moved")"
 for model in ismir2021 mt3; do
   out="$work/out-$model.mid"
-  log "启动器转谱（$model，包已被拖到别处）…"
+  log "启动器转谱（${model}，包已被拖到别处）…"
   "$launcher" --cli "$wav" -o "$out" --model "$model" --rearrange || {
     show_log
-    die "转谱失败（$model）"
+    die "转谱失败（${model}）"
   }
   test -s "$out" || die "没有生成 MIDI: $out"
   test -s "${out%.mid}.rearranged.mid" || die "没有生成整理后的 MIDI"
@@ -171,7 +171,7 @@ fi
 
 # ---------------------------------------------------------------- 只读卷（dmg）
 if [ -n "$mounted" ]; then
-  log "从只读卷启动（$app）…"
+  log "从只读卷启动（${app}）…"
   mount_before="$(fingerprint "$app")"
   if ! "$app/Contents/MacOS/mt3-transcriber" --cli "$wav" \
        -o "$work/ro.mid" --model ismir2021 >/dev/null 2>&1; then

@@ -2,7 +2,7 @@
 # 把运行时校正到当前路径。
 #
 # 运行时的两种来源：
-#   * Linux deb/rpm/AppImage：首次启动把内置 runtime.tar.zst 解压到 $MT3_HOME；
+#   * Linux deb/rpm/AppImage：首次启动把内置 runtime.tar.zst 解压到 ${MT3_HOME}；
 #   * macOS .app：运行时就在包内（Contents/Resources/runtime），用户可能随意拖动。
 #
 # uv 创建的 venv 里记录的是构建时的绝对路径（pyvenv.cfg 的 home、bin/python 符号

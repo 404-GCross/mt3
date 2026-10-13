@@ -27,7 +27,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   die "macOS 没有 NVIDIA GPU/CUDA：包内已经是 CPU 版 JAX，直接使用即可。"
 fi
 
-[ -x "$VENV_DIR/bin/python" ] || die "未找到 MT3 环境: $VENV_DIR（先运行 mt3-transcriber）"
+[ -x "$VENV_DIR/bin/python" ] || die "未找到 MT3 环境: ${VENV_DIR}（先运行 mt3-transcriber）"
 if ! command -v nvidia-smi >/dev/null 2>&1; then
   warn "未检测到 nvidia-smi；没有 NVIDIA 驱动时装了 CUDA 版 JAX 也只能用 CPU。"
 fi
@@ -71,7 +71,7 @@ if [ -z "$UV" ]; then
   esac
   url="https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz"
   [ -n "$MT3_GH_PROXY" ] && url="${MT3_GH_PROXY%/}/$url"
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/mt3-jax.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
   fetch "$url" "$tmp/uv.tar.gz"
   tar -xzf "$tmp/uv.tar.gz" -C "$tmp"

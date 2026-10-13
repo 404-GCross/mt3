@@ -42,7 +42,7 @@ if [ -d "$checkpoints_src" ]; then
   cp -a "$checkpoints_src"/. "$PKG/usr/share/mt3-transcriber/checkpoints/"
   echo "checkpoints: $(du -sh "$checkpoints_src" | cut -f1)"
 else
-  echo "warning: 未找到 $checkpoints_src；包内不含模型权重。" >&2
+  echo "warning: 未找到 ${checkpoints_src}；包内不含模型权重。" >&2
 fi
 find "$PKG" -type d -exec chmod 755 {} +
 cat > "$PKG/usr/bin/mt3-transcriber" <<'EOF'

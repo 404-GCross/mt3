@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建 deb/rpm 内置的「离线运行时」压缩包。
 #
-# 内容 = 一个完整的 $MT3_HOME：
+# 内容 = 一个完整的 ${MT3_HOME}：
 #   python/   uv 提供的独立 Python 3.12（不依赖系统 Python）
 #   venv/     私有虚拟环境，含 CPU 版 jax/tensorflow/t5x/seqio/note-seq 等
 #
@@ -85,7 +85,7 @@ if [ "$JAX_CUDA" = "cpu" ]; then
   log "安装 JAX（CPU）…"
   "$UV_BIN" pip install --python "$VENV_PY" jax
 else
-  log "安装 JAX（$JAX_CUDA）…"
+  log "安装 JAX（${JAX_CUDA}）…"
   "$UV_BIN" pip install --python "$VENV_PY" "jax[$JAX_CUDA]"
 fi
 

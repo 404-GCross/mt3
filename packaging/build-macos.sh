@@ -139,7 +139,7 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
 PY
 }
 
-log "安装 tensorflow-cpu 兼容壳（$tf_version）…"
+log "安装 tensorflow-cpu 兼容壳（${tf_version}）…"
 make_tensorflow_cpu_shim "$tf_version" "$tf_shim"
 "$UV_BIN" pip install --python "$VENV_PY" "$tf_shim"
 
@@ -208,7 +208,7 @@ if [ -d "$CHECKPOINTS_DIR" ]; then
   cp -a "$CHECKPOINTS_DIR"/. "$RES/checkpoints/"
   log "checkpoints: $(du -sh "$CHECKPOINTS_DIR" | cut -f1)"
 else
-  warn "未找到 $CHECKPOINTS_DIR：包内不含模型权重，首次使用需联网下载。"
+  warn "未找到 ${CHECKPOINTS_DIR}：包内不含模型权重，首次使用需联网下载。"
 fi
 
 # 预编译字节码：运行时用 PYTHONDONTWRITEBYTECODE=1 启动，包内一个文件也不写
@@ -379,7 +379,7 @@ log "自检（导入 + 后处理）…"
 # 没有 Apple Developer 账号时只能做 ad-hoc 签名：用户首次打开仍需「右键 → 打开」。
 # 包内运行时是相对路径、启动时不改包内文件，所以签名不会被运行过程破坏。
 if [ -n "${APPLE_SIGN_IDENTITY:-}" ]; then
-  log "签名（$APPLE_SIGN_IDENTITY）…"
+  log "签名（${APPLE_SIGN_IDENTITY}）…"
   codesign --force --deep --options runtime --timestamp \
     --sign "$APPLE_SIGN_IDENTITY" "$APP" || die "codesign 失败"
   codesign --verify --deep --strict "$APP" || die "签名校验失败"

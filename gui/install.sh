@@ -193,7 +193,7 @@ if [ ! -x "$UV" ]; then
     Darwin:arm64|Darwin:aarch64) uv_arch="aarch64-apple-darwin" ;;
     *) die "暂不支持的 CPU 架构: $OS $(uname -m)" ;;
   esac
-  tmp="$(mktemp -d)"
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/mt3-uv.XXXXXX")"
   trap 'rm -rf "$tmp"' EXIT
   fetch "$(gh_proxy "https://github.com/astral-sh/uv/releases/latest/download/uv-${uv_arch}.tar.gz")" "$tmp/uv.tar.gz"
   tar -xzf "$tmp/uv.tar.gz" -C "$tmp"
@@ -248,22 +248,22 @@ fi
 # ---------------------------------------------------------------- 安装依赖
 if [ "$JAX_CUDA" = "cpu" ] || [ "$OS" = "Darwin" ]; then
   [ "$OS" = "Darwin" ] && [ "$JAX_CUDA" != "cpu" ] \
-    && warn "macOS 上没有 CUDA，改用 CPU 版 JAX（忽略 JAX_CUDA=$JAX_CUDA）。"
+    && warn "macOS 上没有 CUDA，改用 CPU 版 JAX（忽略 JAX_CUDA=${JAX_CUDA}）。"
   log "安装 JAX（CPU）…"
   "$UV" pip install --python "$VENV_PY" jax
 else
-  log "安装 JAX（$JAX_CUDA）…"
+  log "安装 JAX（${JAX_CUDA}）…"
   "$UV" pip install --python "$VENV_PY" "jax[$JAX_CUDA]"
 fi
 
 log "安装 MT3 及依赖（tensorflow/flax/t5x/seqio/note-seq，约 5~15 分钟）…"
 if [ ! -e "$REPO_DIR/setup.py" ] && [ ! -e "$REPO_DIR/pyproject.toml" ]; then
-  die "安装目录缺少 setup.py（$REPO_DIR）：包不完整，请重新安装最新版本。"
+  die "安装目录缺少 setup.py（${REPO_DIR}）：包不完整，请重新安装最新版本。"
 fi
 # deb/rpm 的 /usr/share/mt3-transcriber 是只读的，setuptools 无法在那里创建
 # build/（error: could not create 'build/lib/mt3': Permission denied）。先复制到
 # 可写临时目录，再从那里做非 editable 安装。
-stage="$(mktemp -d)"
+stage="$(mktemp -d "${TMPDIR:-/tmp}/mt3-stage.XXXXXX")"
 for f in setup.py setup.cfg; do
   if [ -e "$REPO_DIR/$f" ]; then cp -a "$REPO_DIR/$f" "$stage/"; fi
 done

@@ -57,7 +57,7 @@ elif [ "$INSTALLED" = 1 ] || [ -n "$RUNTIME_TAR" ]; then
   VENV_DIR="${MT3_VENV_DIR:-$MT3_HOME/venv}"
   # 内置运行时固定展开到 $MT3_HOME/venv，指向别处的 MT3_VENV_DIR 在这里没有意义。
   if [ -f "$RUNTIME_TAR" ] && [ "$VENV_DIR" != "$MT3_HOME/venv" ]; then
-    echo "提示: 内置运行时固定展开到 $MT3_HOME/venv（忽略 MT3_VENV_DIR=$VENV_DIR）" >&2
+    echo "提示: 内置运行时固定展开到 $MT3_HOME/venv（忽略 MT3_VENV_DIR=${VENV_DIR}）" >&2
     VENV_DIR="$MT3_HOME/venv"
   fi
 fi
@@ -109,7 +109,7 @@ if [ "${MT3_FORCE_RUNTIME:-0}" = 1 ] || ! runtime_is_current; then
         rm -rf "$VENV_DIR"
         ;;
       *)
-        echo "拒绝删除非 venv 目录: $VENV_DIR（请检查 MT3_VENV_DIR）" >&2
+        echo "拒绝删除非 venv 目录: ${VENV_DIR}（请检查 MT3_VENV_DIR）" >&2
         exit 1
         ;;
     esac

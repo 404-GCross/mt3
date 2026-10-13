@@ -21,6 +21,8 @@ jobs:
           python -m py_compile gui/*.py
           python -m compileall -q mt3
           bash -n gui/*.sh packaging/*.sh
+          # bash 3.2（macOS 自带）会把「$VAR 紧跟中文字符」当成变量名的一部分。
+          python packaging/check-shell-utf8.py
       - name: Post-process selftest (needs only mido)
         run: |
           python -m pip install --quiet 'mido>=1.3'

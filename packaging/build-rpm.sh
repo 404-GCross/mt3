@@ -37,7 +37,7 @@ if [ -d "$checkpoints_src" ]; then
   cp -a "$checkpoints_src"/. "$ROOT/.rpmbuild/SOURCES/mt3-transcriber/checkpoints/"
   echo "checkpoints: $(du -sh "$checkpoints_src" | cut -f1)"
 else
-  echo "warning: 未找到 $checkpoints_src；包内不含模型权重。" >&2
+  echo "warning: 未找到 ${checkpoints_src}；包内不含模型权重。" >&2
 fi
 find "$ROOT/.rpmbuild/SOURCES/mt3-transcriber" -type d -exec chmod 755 {} +
 tar -C "$ROOT/.rpmbuild/SOURCES" --use-compress-program='gzip -1' \
