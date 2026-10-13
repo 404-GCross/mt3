@@ -347,7 +347,7 @@ class Mt3App:
     row += 1
 
     head = ttk.Frame(post)
-    head.grid(row=0, column=0, columnspan=4, sticky='w', padx=10, pady=(4, 2))
+    head.grid(row=0, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 2))
     ttk.Checkbutton(head, text='启用（转谱后自动整理）',
                     variable=self.rearrange_enabled).pack(side='left')
     ttk.Checkbutton(head, text='包含鼓轨（默认跳过）',
@@ -355,13 +355,14 @@ class Mt3App:
 
     for index, (key, label, unit) in enumerate(REARRANGE_FIELDS):
       cell = ttk.Frame(post)
-      cell.grid(row=1, column=index, sticky='w', padx=(10, 10), pady=(0, 2))
-      ttk.Label(cell, text=f'{label}（{unit}）').pack(anchor='w')
-      ttk.Entry(cell, textvariable=self.rearrange_vars[key], width=8).pack(
-          anchor='w')
+      cell.grid(row=1 + index // 2, column=index % 2, sticky='w',
+                padx=(10, 10), pady=(0, 2))
+      ttk.Label(cell, text=f'{label}（{unit}）').pack(side='left')
+      ttk.Entry(cell, textvariable=self.rearrange_vars[key], width=7).pack(
+          side='left', padx=(4, 0))
 
     actions = ttk.Frame(post)
-    actions.grid(row=2, column=0, columnspan=4, sticky='w', padx=10, pady=(2, 6))
+    actions.grid(row=3, column=0, columnspan=2, sticky='w', padx=10, pady=(4, 6))
     ttk.Button(actions, text='恢复默认',
                command=self.on_reset_rearrange).pack(side='left')
     self.rearrange_button = ttk.Button(
@@ -373,7 +374,7 @@ class Mt3App:
         state='disabled')
     self.open_rearranged_button.pack(side='left', padx=(8, 0))
     ttk.Label(post, text=REARRANGE_HINT).grid(
-        row=3, column=0, columnspan=4, sticky='w', padx=10, pady=(0, 6))
+        row=4, column=0, columnspan=2, sticky='w', padx=10, pady=(0, 6))
 
     button_frame = ttk.Frame(main)
     button_frame.grid(row=row, column=0, columnspan=3, sticky='ew', pady=(12, 6))
