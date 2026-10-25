@@ -402,6 +402,28 @@ rm -rf "$stage" && mkdir -p "$stage"
 # 硬链接：瞬间完成，不额外占磁盘（后续不再修改 .app）。
 cp -al "$APP" "$stage/"
 ln -s /Applications "$stage/Applications"
+
+cat > "$stage/安装说明.txt" <<'TXT'
+MT3 Transcriber —— 安装说明
+================================
+
+1. 把左边的「MT3 Transcriber.app」拖进右边的「应用程序」。
+2. 第一次打开会被系统拦一次（这个应用没有 Apple 签名/公证）：
+   · macOS 12–14：右键点图标 →「打开」→ 再点「打开」
+   · macOS 15 及以上：系统设置 → 隐私与安全性 →「仍要打开」
+   也可以执行：
+   xattr -dr com.apple.quarantine "/Applications/MT3 Transcriber.app"
+
+不想弹窗的装法（终端一行，用 curl 下载就没有隔离标记）：
+   curl -fsSL https://gh-proxy.com/https://github.com/404-GCross/mt3/releases/latest/download/install.sh | bash
+
+局域网转谱（手机 / 另一台电脑用浏览器）：
+   open -a "/Applications/MT3 Transcriber.app" --args --web --lan
+   启动后地址与令牌写在 ~/Library/Logs/mt3-transcriber.log 里
+   （tail -f 那个文件就能看到）。
+
+要求：Apple Silicon（M 系列），macOS 12 Monterey 或更新；纯 CPU 推理。
+TXT
 dmg="$OUT/mt3-transcriber-${VERSION}-${ARCH}.dmg"
 rm -f "$dmg"
 hdiutil create -volname "$VOLUME_NAME" -srcfolder "$stage" -ov -format UDZO \

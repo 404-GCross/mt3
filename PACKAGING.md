@@ -1,5 +1,32 @@
 # MT3 Transcriber 分发与测试
 
+## 一键安装（Linux x86_64 / macOS Apple Silicon）
+
+```bash
+curl -fsSL https://gh-proxy.com/https://github.com/404-GCross/mt3/releases/latest/download/install.sh | bash
+```
+
+脚本自己判断系统：Debian/Ubuntu 走 `.deb`、Fedora/RHEL 走 `.rpm`、其他发行版退到免 root
+的 AppImage；macOS 挂载 dmg 复制到 `/Applications`（并去掉隔离标记，所以不会有
+Gatekeeper 弹窗）。下载和 SHA256 校验都在普通用户下完成，只有最后一条安装命令用 sudo。
+
+| 参数 | 作用 |
+|---|---|
+| `--version 0.3.1` | 固定版本（默认取最新 release） |
+| `--file ./xxx.deb` | 离线安装本地包（`.deb` / `.rpm` / `.AppImage` / `.dmg`） |
+| `--appimage` | Linux 上强制用免 root 的 AppImage |
+| `--cuda cuda13` | 装完顺手换 CUDA 版 JAX（默认只打印命令，不擅自下载 1GB） |
+| `--mirror URL` | 下载前缀，等价于环境变量 `MT3_MIRROR` |
+| `--dry-run` | 只打印解析到的版本、URL 和将执行的命令 |
+| `--uninstall` | 卸载（保留用户数据） |
+| `--yes` / `-y` | 不询问（非交互环境本来就不问） |
+
+- 想先看脚本再跑：`curl -fsSLO <同一个 URL> && less install.sh && bash install.sh`
+- 校验和来自同一 release 的 `SHA256SUMS`，对不上直接中止。
+- 需要 root 的只有 `apt-get install ./x.deb` / `dnf install ./x.rpm`；AppImage 与 macOS
+  分支不需要 root（macOS 写不进 `/Applications` 时退到 `~/Applications`）。
+- 卸载不删 `~/.cache/mt3-transcriber`（任务与权重）和 `~/.config/mt3-transcriber`（WebUI 令牌）。
+
 ## 本地运行
 
 脚本会使用独立的 `uv` 自动安装 Python 3.12 和依赖，**不依赖系统 Python 版本**，也不需要 root。

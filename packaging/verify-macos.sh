@@ -78,6 +78,7 @@ case "$target" in
     mounted="$mountpoint"
     app="$(ls -d "$mountpoint"/*.app 2>/dev/null | head -1 || true)"
     [ -n "$app" ] || die "dmg 里没有 .app"
+    [ -f "$mountpoint/安装说明.txt" ] || die "dmg 里没有 安装说明.txt"
     ;;
   *.app)
     app="$target"

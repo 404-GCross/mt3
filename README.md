@@ -18,8 +18,14 @@ This is not an officially supported Google product.
 `./gui/run.sh --web --lan`），模型跑在装显卡的那台机器上，Mac/手机打开终端里打印的
 链接即可。用法、令牌、上限与防火墙见 [PACKAGING.md](PACKAGING.md) 的 WebUI 一节。
 
-安装包（deb / rpm / AppImage / Docker / macOS .dmg）、镜像加速与构建说明见
-[PACKAGING.md](PACKAGING.md)。
+一键安装（Linux x86_64 / macOS Apple Silicon）：
+
+```bash
+curl -fsSL https://gh-proxy.com/https://github.com/404-GCross/mt3/releases/latest/download/install.sh | bash
+```
+
+包内自带 Python 运行时与两个模型权重，装好即可离线使用。安装包（deb / rpm / AppImage /
+Docker / macOS .dmg）、镜像加速与构建说明见 [PACKAGING.md](PACKAGING.md)。
 
 ## Transcribe your own audio
 
