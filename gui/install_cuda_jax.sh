@@ -9,6 +9,8 @@
 #   ./gui/install_cuda_jax.sh              # CUDA 12（推荐，兼容面广）
 #   JAX_CUDA=cuda13 ./gui/install_cuda_jax.sh
 #
+# 不要用 sudo：它只写你自己的 ~/.local/share/mt3-transcriber。
+#
 # 国内加速：MT3_GH_PROXY / MT3_PIP_INDEX，或写进
 # ~/.config/mt3-transcriber/mirror.conf（与环境变量同义，环境变量优先）。
 
@@ -27,7 +29,15 @@ if [ "$(uname -s)" = "Darwin" ]; then
   die "macOS 没有 NVIDIA GPU/CUDA：包内已经是 CPU 版 JAX，直接使用即可。"
 fi
 
-[ -x "$VENV_DIR/bin/python" ] || die "未找到 MT3 环境: ${VENV_DIR}（先运行 mt3-transcriber）"
+if [ ! -x "$VENV_DIR/bin/python" ]; then
+  hint=""
+  if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+    hint="
+（你大概是用了 sudo：这个脚本只改 ${SUDO_USER} 自己的 ~/.local/share，
+  去掉 sudo 再跑一次即可。）"
+  fi
+  die "未找到 MT3 环境: ${VENV_DIR}（先运行 mt3-transcriber）${hint}"
+fi
 if ! command -v nvidia-smi >/dev/null 2>&1; then
   warn "未检测到 nvidia-smi；没有 NVIDIA 驱动时装了 CUDA 版 JAX 也只能用 CPU。"
 fi

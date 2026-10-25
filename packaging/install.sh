@@ -505,16 +505,25 @@ if [ "$OS" = linux ] && command -v nvidia-smi >/dev/null 2>&1; then
     warn "检测到 NVIDIA 显卡，但 AppImage 不支持原地换 CUDA 版 JAX；需要 GPU 请改用 deb/rpm。"
   elif [ -n "$CUDA" ] && [ "$CUDA" != cpu ]; then
     step "换装 ${CUDA} 版 JAX"
+    # 先把运行时按当前版本展开：全新安装时 venv 还不存在，脚本会说找不到环境；
+    # 升级时旧 venv 还在，装进去的 CUDA 版会被下次启动的重新解压覆盖。
+    if [ "$DRY_RUN" = 1 ]; then
+      printf '   %s\n' "mt3-transcriber --help >/dev/null   # 展开运行时"
+    else
+      mt3-transcriber --help >/dev/null 2>&1 || true
+    fi
+    # 这个脚本只改你自己的 ~/.local/share/mt3-transcriber，不要 sudo
+    # （sudo 会把 HOME 换成 /root，反而找不到运行时）。
     if [ "$DRY_RUN" = 1 ] || [ -x /usr/share/mt3-transcriber/gui/install_cuda_jax.sh ]; then
-      run $SUDO env "JAX_CUDA=${CUDA}" \
+      run env "JAX_CUDA=${CUDA}" \
         /usr/share/mt3-transcriber/gui/install_cuda_jax.sh
     else
       warn "找不到 install_cuda_jax.sh；手动运行："
-      warn "  sudo JAX_CUDA=${CUDA} /usr/share/mt3-transcriber/gui/install_cuda_jax.sh"
+      warn "  JAX_CUDA=${CUDA} /usr/share/mt3-transcriber/gui/install_cuda_jax.sh"
     fi
   else
-    warn "检测到 NVIDIA 显卡；包内默认是 CPU 版 JAX。要 GPU 加速："
-    warn "  sudo JAX_CUDA=cuda13 /usr/share/mt3-transcriber/gui/install_cuda_jax.sh"
+    warn "检测到 NVIDIA 显卡；包内默认是 CPU 版 JAX。要 GPU 加速（不需要 sudo）："
+    warn "  JAX_CUDA=cuda13 /usr/share/mt3-transcriber/gui/install_cuda_jax.sh"
   fi
 fi
 
