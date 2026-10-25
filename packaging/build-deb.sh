@@ -49,7 +49,8 @@ cat > "$PKG/usr/bin/mt3-transcriber" <<'EOF'
 #!/usr/bin/env bash
 exec /usr/share/mt3-transcriber/gui/run.sh "$@"
 EOF
-chmod 755 "$PKG/usr/share/mt3-transcriber/gui/"*.sh
+# cat > 新建的文件是 644：不 chmod 的话装完 `mt3-transcriber` 会 Permission denied。
+chmod 755 "$PKG/usr/bin/mt3-transcriber" "$PKG/usr/share/mt3-transcriber/gui/"*.sh
 cp "$ROOT/packaging/mt3-transcriber.desktop" "$PKG/usr/share/applications/"
 cp "$ROOT/packaging/mt3-transcriber-web.desktop" "$PKG/usr/share/applications/"
 cp "$ROOT/packaging/mt3-transcriber.png" \
