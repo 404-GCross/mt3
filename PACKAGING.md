@@ -22,7 +22,12 @@ Gatekeeper 弹窗）。下载和 SHA256 校验都在普通用户下完成，只�
 | `--yes` / `-y` | 不询问（非交互环境本来就不问） |
 
 - 想先看脚本再跑：`curl -fsSLO <同一个 URL> && less install.sh && bash install.sh`
-- 校验和来自同一 release 的 `SHA256SUMS`，对不上直接中止。
+- **自动选源**：先对「GitHub 直连」和 `gh-proxy` 各取样 256 KB 测速，用快的那个；
+  下载失败会自动换另一个。`--mirror URL` 显式指定时不再测速，`--no-probe` 则直接用直连。
+- **校验和优先直连 GitHub**（哪怕包是从镜像下的）：直连不通才退回镜像，并打印
+  「校验和来自镜像，无法独立验证」；对不上直接中止。
+- GitHub 完全不通时版本号也拿不到：加 `--version 0.3.3` 跳过解析
+  （`api.github.com` 走不了 gh-proxy 这类前缀）。
 - 需要 root 的只有 `apt-get install ./x.deb` / `dnf install ./x.rpm`；AppImage 与 macOS
   分支不需要 root（macOS 写不进 `/Applications` 时退到 `~/Applications`）。
 - 卸载不删 `~/.cache/mt3-transcriber`（任务与权重）和 `~/.config/mt3-transcriber`（WebUI 令牌）。

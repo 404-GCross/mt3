@@ -41,21 +41,37 @@ jobs:
           # 每个分支都要解析出正确的包名；不支持的组合必须非零退出。
           for distro in debian fedora; do
             MT3_TEST_OS=Linux MT3_TEST_DISTRO=$distro MT3_TEST_ARCH=x86_64 \
-              bash packaging/install.sh --dry-run --version 0.0.0 \
+              bash packaging/install.sh --dry-run --no-probe --version 0.0.0 \
               | tee "/tmp/install-$distro.txt"
           done
           grep -q 'mt3-transcriber_0.0.0_amd64.deb' /tmp/install-debian.txt
           grep -q 'mt3-transcriber-0.0.0-1.x86_64.rpm' /tmp/install-fedora.txt
+          grep -q 'GitHub 直连（--no-probe）' /tmp/install-debian.txt
+          if grep -q '各取 256 KB' /tmp/install-debian.txt; then
+            echo '--no-probe 不应该测速' >&2; exit 1
+          fi
+
           MT3_TEST_OS=Darwin MT3_TEST_ARCH=arm64 MT3_TEST_MACOS=13 \
-            bash packaging/install.sh --dry-run --version 0.0.0 \
+            bash packaging/install.sh --dry-run --no-probe --version 0.0.0 \
             | tee /tmp/install-macos.txt
           grep -q 'mt3-transcriber-0.0.0-arm64.dmg' /tmp/install-macos.txt
+
+          # 显式 --mirror：不测速，URL 直接用给定前缀。
+          MT3_TEST_OS=Linux MT3_TEST_DISTRO=fedora MT3_TEST_ARCH=x86_64 \
+            bash packaging/install.sh --dry-run --mirror https://gh-proxy.com/ \
+            --version 0.0.0 | tee /tmp/install-mirror.txt
+          grep -q 'https://gh-proxy.com/https://github.com/404-GCross/mt3/releases' \
+            /tmp/install-mirror.txt
+          if grep -q '各取 256 KB' /tmp/install-mirror.txt; then
+            echo '--mirror 不应该测速' >&2; exit 1
+          fi
+
           if MT3_TEST_OS=Darwin MT3_TEST_ARCH=x86_64 MT3_TEST_MACOS=13 \
-               bash packaging/install.sh --dry-run --version 0.0.0; then
+               bash packaging/install.sh --dry-run --no-probe --version 0.0.0; then
             echo 'Intel Mac 应该被拒绝' >&2; exit 1
           fi
           if MT3_TEST_OS=Linux MT3_TEST_DISTRO=fedora MT3_TEST_ARCH=aarch64 \
-               bash packaging/install.sh --dry-run --version 0.0.0; then
+               bash packaging/install.sh --dry-run --no-probe --version 0.0.0; then
             echo 'Linux arm64 应该被拒绝' >&2; exit 1
           fi
 

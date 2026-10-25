@@ -27,6 +27,7 @@ UNINSTALL=0
 FORCE_MODE=""
 CUDA=""
 MIRROR="${MT3_MIRROR:-}"
+NO_PROBE=0
 INSTALL_PATH=""
 
 say() { printf '\033[1;32m[mt3]\033[0m %s\n' "$*"; }
@@ -50,7 +51,8 @@ MT3 Transcriber 一键安装（Linux x86_64 / macOS Apple Silicon）
   --file PATH        安装本地包（.deb / .rpm / .AppImage / .dmg），不下载
   --appimage         Linux 上强制用免 root 的 AppImage
   --cuda WHICH       cpu | cuda12 | cuda13（默认不装，只打印命令）
-  --mirror URL       下载前缀，例如 https://gh-proxy.com/
+  --mirror URL       下载前缀，例如 https://gh-proxy.com/（显式指定，不测速）
+  --no-probe         不测速，直接用 GitHub 直连
   --dry-run          只打印会做什么，不下载、不安装
   --yes, -y          不询问（非交互环境本来就不问）
   --uninstall        卸载（保留用户数据）
@@ -147,6 +149,10 @@ while [ $# -gt 0 ]; do
       [ $# -ge 2 ] || die "--mirror 需要一个前缀 URL"
       MIRROR="$2"
       shift 2
+      ;;
+    --no-probe)
+      NO_PROBE=1
+      shift
       ;;
     --dry-run)
       DRY_RUN=1
@@ -284,7 +290,11 @@ resolve_version() {
   fi
   case "$tag" in
     v[0-9]*) VERSION="${tag#v}" ;;
-    *) die "解析不到最新版本，请用 --version 0.3.1 指定" ;;
+    *)
+      die "解析不到最新版本（直连 GitHub 不通？）。
+       加 --version X.Y.Z（例如 0.3.3）跳过这一步，或用 --mirror 指定下载前缀。
+       注意：版本号必须自己给——api.github.com 走不了 gh-proxy 这类前缀。" ;;
+
   esac
 }
 
@@ -305,24 +315,129 @@ sha256_check() {
   fi
 }
 
-download_asset() {
-  local name="$1"
-  local url="https://github.com/${REPO}/releases/download/v${VERSION}/${name}"
-  say "下载 ${name}"
-  if [ "$DRY_RUN" = 1 ]; then
-    say "   ${MIRROR}${url}"
+format_speed() {  # bytes/s -> 人能读的速度
+  awk -v bps="${1:-0}" 'BEGIN {
+    if (bps >= 1048576) printf "%.1f MB/s", bps / 1048576;
+    else if (bps >= 1024) printf "%.0f KB/s", bps / 1024;
+    else printf "%.0f B/s", bps;
+  }'
+}
+
+probe_speed() {  # URL -> bytes/s（0 = 不可用/太慢）
+  local url="$1" speed=""
+  # Range 取样 256 KB；支持 Range 的源（GitHub）几乎瞬间完成，不支持的
+  # （某些镜像）最多也只采样 5 秒——相对 1GB 的下载可以忽略。
+  # 注意不要用 --max-filesize：不认 Range 的源会因 Content-Length 超限
+  # 直接退 63、一个字节都不收，测出来永远是 0。
+  speed="$(curl -fsSL --connect-timeout 4 --max-time 5 \
+    --range 0-262143 -o /dev/null -w '%{speed_download}' "$url" 2>/dev/null)" \
+    || true
+  case "$speed" in
+    '' | *[!0-9.]*) printf '0\n' ;;
+    *) printf '%s\n' "$speed" ;;
+  esac
+}
+
+select_source() {  # 资产 URL -> 设置 CHOSEN_PREFIX
+  local url="$1"
+  CHOSEN_PREFIX=""
+
+  if [ -n "$MIRROR" ]; then
+    CHOSEN_PREFIX="$MIRROR"
+    say "下载源：${MIRROR}（--mirror，不测速）"
     return 0
   fi
-  mkdir -p "${WORK}/dist"
-  curl -fL --retry 3 --progress-bar -o "${WORK}/dist/${name}" "${MIRROR}${url}" \
-    || die "下载失败：${url}（国内可加 --mirror https://gh-proxy.com/）"
+  if [ "$NO_PROBE" = 1 ]; then
+    say "下载源：GitHub 直连（--no-probe）"
+    return 0
+  fi
+
+  # 只放两个：直连 + 文档里的 gh-proxy。第三方镜像寿命不稳，不内置。
+  local candidates=("GitHub 直连|" "gh-proxy|https://gh-proxy.com/")
+  local best_prefix="" best_speed=0
+  local item label prefix speed
+
+  say "测速（各取 256 KB）："
+  for item in "${candidates[@]}"; do
+    label="${item%%|*}"
+    prefix="${item#*|}"
+    speed="$(probe_speed "${prefix}${url}")"
+    if awk -v value="$speed" 'BEGIN { exit !(value > 0) }'; then
+      printf '       %s: %s\n' "$label" "$(format_speed "$speed")"
+    else
+      printf '       %s: 不可用\n' "$label"
+    fi
+    if awk -v value="$speed" -v best="$best_speed" \
+      'BEGIN { exit !(value > best) }'; then
+      best_speed="$speed"
+      best_prefix="$prefix"
+    fi
+  done
+
+  if ! awk -v value="$best_speed" 'BEGIN { exit !(value > 0) }'; then
+    # 测速只是参考：都测不出来时先用直连，下载阶段失败会自动换镜像。
+    CHOSEN_PREFIX=""
+    warn "测速没有结果（网络慢或被挡）；先用直连，失败会自动换镜像。"
+    return 0
+  fi
+  CHOSEN_PREFIX="$best_prefix"
+  if [ -z "$best_prefix" ]; then
+    say "选中最快：GitHub 直连（$(format_speed "$best_speed")）"
+  else
+    say "选中最快：gh-proxy（$(format_speed "$best_speed")）"
+  fi
+}
+
+verify_checksum() {  # 资产文件名
+  local name="$1"
+  local sums_url="https://github.com/${REPO}/releases/download/v${VERSION}/SHA256SUMS"
 
   say "校验 SHA256"
-  curl -fsSL -o "${WORK}/SHA256SUMS" \
-    "${MIRROR}https://github.com/${REPO}/releases/download/v${VERSION}/SHA256SUMS" \
-    || die "下载 SHA256SUMS 失败"
+  # 校验和优先直连 GitHub：镜像就算作恶也改不了包（直连不通才退回镜像）。
+  if ! curl -fsSL -o "${WORK}/SHA256SUMS" "$sums_url"; then
+    if [ -z "$CHOSEN_PREFIX" ] \
+      || ! curl -fsSL -o "${WORK}/SHA256SUMS" "${CHOSEN_PREFIX}${sums_url}"; then
+      die "下载 SHA256SUMS 失败"
+    fi
+    warn "校验和来自镜像（${CHOSEN_PREFIX}），无法独立验证。"
+  fi
   ( cd "${WORK}" && grep -F "dist/${name}" SHA256SUMS | sha256_check ) \
     || die "SHA256 校验失败，已中止：${name}"
+}
+
+download_asset() {  # 资产文件名
+  local name="$1"
+  local url="https://github.com/${REPO}/releases/download/v${VERSION}/${name}"
+
+  say "下载 ${name}"
+  select_source "$url"
+  if [ "$DRY_RUN" = 1 ]; then
+    say "   ${CHOSEN_PREFIX}${url}"
+    say "   SHA256SUMS 优先直连 GitHub（取不到才用镜像）"
+    return 0
+  fi
+
+  mkdir -p "${WORK}/dist"
+  # 首选失败就换另一个源（直连 <-> 镜像）重试一次。
+  local order=("$CHOSEN_PREFIX")
+  if [ -z "$CHOSEN_PREFIX" ]; then
+    order+=("https://gh-proxy.com/")
+  else
+    order+=("")
+  fi
+
+  local prefix ok=0
+  for prefix in "${order[@]}"; do
+    if curl -fL --retry 2 --progress-bar -o "${WORK}/dist/${name}" \
+      "${prefix}${url}"; then
+      ok=1
+      break
+    fi
+    warn "从 ${prefix:-GitHub 直连} 下载失败，换一个源重试…"
+  done
+  [ "$ok" = 1 ] || die "下载失败：${url}（可用 --mirror 指定前缀）"
+
+  verify_checksum "$name"
 }
 
 WORK=""
