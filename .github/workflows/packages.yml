@@ -27,6 +27,11 @@ jobs:
         run: |
           python -m pip install --quiet 'mido>=1.3'
           python gui/midi_rearrange.py --selftest
+      - name: WebUI selftest (no model needed)
+        run: |
+          python -m pip install --quiet 'mido>=1.3' fastapi uvicorn \
+            python-multipart httpx soundfile
+          python gui/webui/selftest.py
       - name: Check downloader
         run: python gui/download_checkpoints.py --models ismir2021 --list
 

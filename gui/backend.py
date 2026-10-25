@@ -315,6 +315,18 @@ class Transcriber:
   def loaded_models(self):
     return sorted(self._models)
 
+  def unload_models(self, keep=None):
+    """卸载缓存的模型，释放内存/显存。
+
+    Args:
+      keep: 保留的模型名；``None`` 表示全部卸载。WebUI 在 GPU 上默认只留最近
+        用过的那个模型，避免两个模型同时驻留显存。
+    """
+    for name in list(self._models):
+      if keep is None or name != keep:
+        del self._models[name]
+    return self.loaded_models
+
   def transcribe_file(self, audio_path, model_type, progress_cb=None):
     """Transcribe an audio file to a NoteSequence."""
     audio_path = Path(audio_path)

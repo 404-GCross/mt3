@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>MT3 扒谱 · 需要访问令牌</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>MT3 扒谱<span class="sub">需要访问令牌</span></h1>
+  </header>
+  <section class="panel login">
+    <p>这个地址需要访问令牌。请用启动服务时打印的带 <code>?t=…</code> 的链接打开，
+       或者把令牌贴在下面。</p>
+    <form method="get" action="/">
+      <input type="password" name="t" placeholder="访问令牌"
+             autofocus autocomplete="off" spellcheck="false">
+      <button class="primary" type="submit">进入</button>
+    </form>
+    <p class="muted">令牌保存在服务器的
+      <code>~/.config/mt3-transcriber/web_token</code>；
+      用 <code>--new-token</code> 可以重新生成。</p>
+  </section>
+</div>
+</body>
+</html>

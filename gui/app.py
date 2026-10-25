@@ -914,6 +914,39 @@ def main():
                       help='批量模式输入目录')
   parser.add_argument('--batch-output', metavar='DIR',
                       help='批量模式输出目录')
+  parser.add_argument(
+      '--web', action='store_true',
+      help='WebUI 模式：在浏览器里转谱（配合 --lan 供局域网使用），不打开图形界面')
+  parser.add_argument(
+      '--host', default='127.0.0.1',
+      help='WebUI 监听地址（默认 127.0.0.1，只允许本机）')
+  parser.add_argument(
+      '--lan', action='store_true',
+      help='等价于 --host 0.0.0.0：局域网内的设备也能用（强制令牌）')
+  parser.add_argument(
+      '--port', type=int, default=8765, metavar='N',
+      help='WebUI 端口（默认 8765，被占用时自动往后找）')
+  parser.add_argument(
+      '--token', metavar='TOKEN',
+      help='WebUI 访问令牌（默认读取/生成 ~/.config/mt3-transcriber/web_token）')
+  parser.add_argument(
+      '--new-token', action='store_true',
+      help='重新生成 WebUI 访问令牌（旧链接会失效）')
+  parser.add_argument(
+      '--max-bytes', type=int, default=1024 ** 3, metavar='N',
+      help='WebUI 单文件上限，字节（默认 1 GiB）')
+  parser.add_argument(
+      '--max-minutes', type=float, default=30, metavar='M',
+      help='WebUI 音频时长上限，分钟（默认 30）')
+  parser.add_argument(
+      '--queue', type=int, default=8, metavar='N',
+      help='WebUI 队列上限（默认 8）')
+  parser.add_argument(
+      '--keep-hours', type=float, default=24, metavar='H',
+      help='WebUI 结果保留小时数（默认 24）')
+  parser.add_argument(
+      '--keep-models', type=int, default=1, choices=(1, 2),
+      help='WebUI 同时缓存几个模型（默认 1，GPU 上省显存）')
   parser.add_argument('--rearrange', action='store_true',
                       help='转谱后做一次后处理（另存 <输出>.rearranged.mid）')
   parser.add_argument('--rearrange-velocity', type=int,
@@ -936,6 +969,12 @@ def main():
 
   if args.check_fonts:
     sys.exit(check_fonts())
+
+  if args.web:
+    if args.cli or args.batch_input or args.audio:
+      parser.error('--web 不能和 --cli / --batch-input / 音频文件一起用')
+    from webui.server import run_server
+    sys.exit(run_server(args))
 
   if args.audio and args.cli:
     parser.error('音频文件请只给一次：位置参数（图形界面预选）或 --cli（命令行模式）')

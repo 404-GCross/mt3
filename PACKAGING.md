@@ -42,6 +42,61 @@ GUI 中可选择：自动、NVIDIA GPU、CPU（macOS 上只列出「自动（CPU
 > `MT3_CHECKPOINT_DIR` 控制权重目录（默认 `~/.cache/mt3-transcriber/checkpoints`，
 > macOS 为 `~/Library/Caches/mt3-transcriber/checkpoints`）。
 
+## WebUI（浏览器 / 局域网）
+
+除了桌面窗口，还可以把 MT3 跑成一个**局域网服务**：模型在服务器上算，Mac/手机/
+另一台电脑只用浏览器。适合「Linux + NVIDIA 显卡当算力机，Mac 只负责看界面」。
+
+```bash
+./gui/run.sh --web --lan           # 源码目录
+mt3-transcriber --web --lan        # deb/rpm 装好之后（也有「MT3 转谱服务（局域网）」图标）
+```
+
+启动后打印带令牌的地址：
+
+```
+  本机：    http://127.0.0.1:8765/?t=…
+  局域网：  http://192.168.1.201:8765/?t=…
+```
+
+把这个链接发到手机/Mac 上打开即可（首次访问会把令牌换成 cookie，之后页面里不再带
+`?t=`）。
+
+- **令牌**：默认保存在 `~/.config/mt3-transcriber/web_token`（macOS 同路径），
+  `--new-token` 重新生成，`--token XXX` 可临时指定。**没有令牌连本机也打不开**——
+  否则任意网页都能用表单 POST 打 `127.0.0.1`（CSRF / DNS rebinding）。
+- **只监听本机**是默认；`--lan` 等价于 `--host 0.0.0.0`。端口默认 8765，被占用会
+  自动往后找，也可以用 `--port`。
+- **上限**：单文件 1 GiB、时长 30 分钟、队列 8 个（`--max-bytes` / `--max-minutes` /
+  `--queue`；上传时会临时占用约两倍文件大小的磁盘空间）。结果留在
+  `~/.cache/mt3-transcriber/web/`（macOS 为
+  `~/Library/Caches/mt3-transcriber/web/`），默认保留 24 小时（`--keep-hours`）；
+  **服务重启会清空已完成的任务**，想要的文件请先下载。
+- **设备**是服务端启动参数（`--device auto|cuda|cpu`），页面上只读显示；JAX 的平台
+  启动后不能切换，要换设备就重启服务。
+- GPU 上默认只缓存一个模型（`--keep-models 1`），避免两个模型同时占显存。
+- 页面上可以对每个任务单独选模型、是否做后处理以及四个阈值；支持多文件排队、取消，
+  下载原始 MIDI 与 `.rearranged.mid`。
+- AppImage 没有桌面图标，直接 `./mt3-transcriber-*.AppImage --web --lan`。
+- macOS：`open -a "/Applications/MT3 Transcriber.app" --args --web --lan`，
+  地址与令牌会打在 `~/Library/Logs/mt3-transcriber.log` 里（`tail -f` 那个文件）。
+
+防火墙不开的话手机连不上：
+
+```bash
+# Fedora / RHEL
+sudo firewall-cmd --add-port=8765/tcp --permanent && sudo firewall-cmd --reload
+# Debian / Ubuntu
+sudo ufw allow 8765/tcp
+```
+
+**安全边界**：明文 HTTP，只应在家里/工作室的局域网用，**不要做端口转发或 DMZ**。
+拿到令牌的人可以上传音频、占用算力、下载自己任务的 MIDI；读不到服务器上的其它文件，
+也改不了设备和配置。
+
+**自检**（不需要模型）：`python gui/webui/selftest.py`，需要
+`fastapi uvicorn python-multipart httpx`。
+
 ## 国内镜像加速（可选）
 
 安装时最慢的两段是 GitHub（uv/Python 下载、flax/t5x 等 git 依赖）和 PyPI

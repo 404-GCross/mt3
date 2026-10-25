@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=MT3 Transcription Server
+Name[zh_CN]=MT3 转谱服务（局域网）
+Comment=Share MT3 transcription over the local network (browser UI)
+Comment[zh_CN]=在局域网内用浏览器转谱：启动后按终端里打印的链接访问（需要令牌）
+Exec=mt3-transcriber --web --lan
+Icon=mt3-transcriber
+Terminal=true
+Categories=AudioVideo;Audio;Music;Network;

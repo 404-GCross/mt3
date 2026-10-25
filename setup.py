@@ -38,6 +38,7 @@ setuptools.setup(
     scripts=[],
     install_requires=[
         'absl-py',
+        'fastapi',          # WebUI（gui/webui），纯 Python，约 8MB
         'flax @ git+https://github.com/google/flax#egg=flax',
         'gin-config',
         'immutabledict',
@@ -47,6 +48,7 @@ setuptools.setup(
         'note-seq @ git+https://github.com/magenta/note-seq#egg=note_seq',
         'numpy',
         'pretty_midi',
+        'python-multipart',  # WebUI 上传（multipart 表单）
         'scikit-learn',
         'scipy',
         'seqio @ git+https://github.com/google/seqio#egg=seqio',
@@ -57,6 +59,8 @@ setuptools.setup(
         'tensorboard',
         'tensorflow',
         'tensorflow-datasets',
+        'uvicorn',          # WebUI 的 ASGI 服务器（不要 uvicorn[standard]，
+                            # 那些 C 扩展对离线打包没好处）
     ],
     classifiers=[
         'Development Status :: 4 - Beta',

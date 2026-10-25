@@ -51,6 +51,7 @@ exec /usr/share/mt3-transcriber/gui/run.sh "$@"
 EOF
 chmod 755 "$PKG/usr/share/mt3-transcriber/gui/"*.sh
 cp "$ROOT/packaging/mt3-transcriber.desktop" "$PKG/usr/share/applications/"
+cp "$ROOT/packaging/mt3-transcriber-web.desktop" "$PKG/usr/share/applications/"
 cp "$ROOT/packaging/mt3-transcriber.png" \
   "$PKG/usr/share/icons/hicolor/256x256/apps/"
 cat > "$PKG/DEBIAN/control" <<EOF

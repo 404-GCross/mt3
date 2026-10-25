@@ -31,9 +31,15 @@ def main() -> int:
   from mt3 import spectrograms  # noqa: F401
   from mt3 import vocabularies  # noqa: F401
 
+  # WebUI（gui/webui）：FastAPI + uvicorn + multipart 解析。
+  import fastapi  # noqa: F401
+  import multipart  # noqa: F401
+  import uvicorn  # noqa: F401
+
   print('  jax        :', jax.__version__, jax.devices())
   print('  tensorflow :', tf.__version__)
   print('  gin / librosa / mido / note_seq / seqio / t5 / t5x: OK')
+  print('  fastapi / uvicorn / multipart: OK')
   print('  后处理模块 : OK')
   print('  mt3 模块   : OK')
   print('OK: 依赖完整')

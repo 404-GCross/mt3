@@ -14,6 +14,10 @@ This is not an officially supported Google product.
 转谱结果还可以做一次可选的**后处理（MIDI 整理）**：删弱音、删极短音、合并琶音
 与重复起音，另存为 `xxx.rearranged.mid`（默认关闭、不覆盖原始结果）。
 
+也可以在**局域网里当服务用**：`mt3-transcriber --web --lan`（或源码目录
+`./gui/run.sh --web --lan`），模型跑在装显卡的那台机器上，Mac/手机打开终端里打印的
+链接即可。用法、令牌、上限与防火墙见 [PACKAGING.md](PACKAGING.md) 的 WebUI 一节。
+
 安装包（deb / rpm / AppImage / Docker / macOS .dmg）、镜像加速与构建说明见
 [PACKAGING.md](PACKAGING.md)。
 

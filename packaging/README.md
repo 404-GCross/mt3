@@ -17,4 +17,7 @@ deb/rpm 与 macOS 应用包内置完整的离线运行时与两个模型权重�
 AppImage 只带运行时，权重首次启动时下载（把体积控制在 GitHub Release 的 2GiB
 上限内）。Windows 尚未支持。
 
+`mt3-transcriber.desktop` 是桌面窗口的图标，`mt3-transcriber-web.desktop` 是
+「局域网服务」图标（`mt3-transcriber --web --lan`，在终端里显示访问链接与令牌）。
+
 完整说明见 [../PACKAGING.md](../PACKAGING.md)。

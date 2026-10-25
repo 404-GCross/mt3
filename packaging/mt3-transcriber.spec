@@ -37,6 +37,8 @@ EOF
 chmod 755 %{buildroot}%{_bindir}/mt3-transcriber %{buildroot}%{_prefix}/share/mt3-transcriber/gui/*.sh
 cp %{buildroot}%{_prefix}/share/mt3-transcriber/packaging/mt3-transcriber.desktop \
   %{buildroot}%{_datadir}/applications/
+cp %{buildroot}%{_prefix}/share/mt3-transcriber/packaging/mt3-transcriber-web.desktop \
+  %{buildroot}%{_datadir}/applications/
 cp %{buildroot}%{_prefix}/share/mt3-transcriber/packaging/mt3-transcriber.png \
   %{buildroot}%{_datadir}/icons/hicolor/256x256/apps/
 
@@ -44,6 +46,7 @@ cp %{buildroot}%{_prefix}/share/mt3-transcriber/packaging/mt3-transcriber.png \
 %{_bindir}/mt3-transcriber
 %{_prefix}/share/mt3-transcriber
 %{_datadir}/applications/mt3-transcriber.desktop
+%{_datadir}/applications/mt3-transcriber-web.desktop
 %{_datadir}/icons/hicolor/256x256/apps/mt3-transcriber.png
 
 %post
