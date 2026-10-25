@@ -13,3 +13,6 @@ dist/
 .tcltk/
 build/
 *.egg-info/
+
+# OpenChamber 的截图/会话产物
+.openchamber/

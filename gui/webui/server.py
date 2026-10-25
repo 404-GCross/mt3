@@ -225,6 +225,9 @@ def create_app(config: WebConfig, manager=None) -> FastAPI:
                   config.max_bytes / 2 ** 30)},
               status_code=413)
     response = await call_next(request)
+    if request.url.path.startswith('/static/'):
+      # 升级后别让浏览器/手机拿旧 CSS：每次都回源校验（有 ETag，命中就是 304）。
+      response.headers['Cache-Control'] = 'no-cache'
     response.headers.setdefault('X-Content-Type-Options', 'nosniff')
     response.headers.setdefault('Referrer-Policy', 'no-referrer')
     response.headers.setdefault(

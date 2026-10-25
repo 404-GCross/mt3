@@ -2,6 +2,10 @@
 
 const $ = (id) => document.getElementById(id);
 
+const MODEL_LABELS = {
+  ismir2021: { name: '钢琴', hint: '最准，带真实力度' },
+  mt3: { name: '多乐器', hint: '多轨，含鼓与贝斯' },
+};
 const STATUS_TEXT = {
   queued: '排队中',
   running: '转谱中',
@@ -9,11 +13,14 @@ const STATUS_TEXT = {
   failed: '失败',
   cancelled: '已取消',
 };
+const FORMATS = ['WAV', 'MP3', 'FLAC', 'OGG', 'M4A', 'AAC', 'AIFF', 'OPUS'];
+const ROLL_COLORS = ['#5b7cff', '#7a6bff', '#4fa3ff', '#8b5cf6', '#22b8cf'];
 
 const state = {
   info: null,
   jobs: [],
   pending: [],
+  model: 'mt3',
   uploading: false,
   xhr: null,
 };
@@ -58,6 +65,13 @@ function fmtDuration(seconds) {
   return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
 }
 
+function fmtClock(seconds) {
+  const total = Math.max(0, Math.round(seconds || 0));
+  const m = String(Math.floor(total / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
 function errorMessage(xhr) {
   try {
     const body = JSON.parse(xhr.responseText);
@@ -80,79 +94,138 @@ async function api(path, options) {
   return response;
 }
 
-// ------------------------------------------------------------------ 初始化
+// ------------------------------------------------------------------ 主题
+
+function initTheme() {
+  // ?theme=dark|light 可以强制预览某个主题（排查显示问题时很方便）。
+  const forced = new URLSearchParams(location.search).get('theme');
+  if (forced === 'dark' || forced === 'light') {
+    document.documentElement.dataset.theme = forced;
+    return;
+  }
+  const saved = localStorage.getItem('mt3-theme');
+  const dark = saved
+    ? saved === 'dark'
+    : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+
+function toggleTheme() {
+  const root = document.documentElement;
+  root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('mt3-theme', root.dataset.theme);
+}
+
+// ------------------------------------------------------------------ 服务信息
 
 function fillInfo(info) {
   state.info = info;
-  $('devicePill').textContent = `设备：${info.device || '未知'}`;
+
+  const gpu = /gpu/i.test(info.device || '');
+  const pill = $('devicePill');
+  pill.className = gpu ? 'pill gpu' : 'pill';
+  pill.replaceChildren(el('i', { class: 'dot' }),
+    document.createTextNode(` ${info.device || '未知设备'}`));
+
   $('versionPill').textContent = info.version && info.version !== 'dev'
     ? `v${info.version}` : '开发版';
 
-  const select = $('model');
-  select.replaceChildren();
-  const labels = { ismir2021: '钢琴（ismir2021）', mt3: '多乐器（mt3）' };
-  for (const [name, available] of Object.entries(info.models || {})) {
-    select.append(el('option', {
-      value: name,
-      disabled: !available,
-      text: labels[name] ? `${labels[name]}${available ? '' : '（权重缺失）'}` : name,
-    }));
-  }
-  const available = Object.entries(info.models || {}).filter(([, ok]) => ok);
-  if (available.length) {
-    const preferred = info.models.mt3 ? 'mt3' : available[0][0];
-    select.value = preferred;
-  }
-
-  const limits = info.limits || {};
-  $('limits').textContent =
-    `单文件 ≤ ${fmtBytes(limits.max_bytes)}，时长 ≤ ${limits.max_minutes} 分钟，` +
-    `队列 ${limits.queue_limit} 个，结果保留 ${limits.keep_hours} 小时；` +
-    '本页只应在局域网内使用，不要做端口转发。';
+  renderModels(info.models || {});
+  fillLimits(info.limits || {});
 
   const defaults = info.rearrange_defaults || {};
   if (defaults.velocity !== undefined) $('velocity').value = defaults.velocity;
   if (defaults.min_ms !== undefined) $('minMs').value = defaults.min_ms;
   if (defaults.chord_ms !== undefined) $('chordMs').value = defaults.chord_ms;
   if (defaults.repeat_ms !== undefined) $('repeatMs').value = defaults.repeat_ms;
+  updateHint();
+}
 
+function fillLimits(limits) {
+  const parts = [
+    `单文件 ≤ ${fmtBytes(limits.max_bytes)}`,
+    `时长 ≤ ${limits.max_minutes} 分钟`,
+    `队列 ${limits.queue_limit}`,
+    `结果保留 ${limits.keep_hours} 小时`,
+  ];
+  $('limits').replaceChildren(...parts.flatMap((text, index) => (
+    index ? [el('span', { class: 'sep' }), el('span', { text })] : [el('span', { text })]
+  )));
+}
+
+function renderModels(models) {
+  const box = $('models');
+  box.replaceChildren();
+  const entries = Object.entries(models);
+  if (!entries.length) {
+    box.append(el('p', { class: 'hint', text: '服务器上没有模型权重，先在服务器上运行 gui/download_checkpoints.py。' }));
+    return;
+  }
+  for (const [name, available] of entries) {
+    const meta = MODEL_LABELS[name] || { name, hint: '' };
+    const button = el('button', {
+      class: 'model',
+      type: 'button',
+      dataset: { model: name },
+      'aria-pressed': 'false',
+    },
+      el('b', {}, meta.name, el('span', { class: 'tick', text: '✓' })),
+      el('span', { text: meta.hint }),
+      el('code', { text: name }),
+    );
+    button.disabled = !available;
+    button.addEventListener('click', () => selectModel(name));
+    box.append(button);
+  }
+  const saved = localStorage.getItem('mt3-model');
+  const preferred = [saved, 'mt3', 'ismir2021'].find((name) => name && models[name]);
+  if (preferred) selectModel(preferred, false);
+}
+
+function selectModel(name, remember = true) {
+  state.model = name;
+  for (const button of document.querySelectorAll('.model')) {
+    button.setAttribute('aria-pressed', String(button.dataset.model === name));
+  }
+  if (remember) localStorage.setItem('mt3-model', name);
   updateHint();
 }
 
 function updateHint() {
   const parts = [];
-  if ($('model').value === 'mt3') {
-    parts.push('mt3 不预测力度（所有音符恒为 100），所以“力度阈值”只对钢琴模型有效。');
+  if (state.model === 'mt3') {
+    parts.push('mt3 不预测力度（全部为 100），力度阈值只对钢琴模型有效。');
   }
   if (!$('rearrange').checked) {
-    parts.push('不勾选时只输出原始 MIDI；勾选后会另存一份 .rearranged.mid，原文件保留。');
+    parts.push('不勾选 MIDI 整理时只输出原始 .mid；勾选后会另存一份 .rearranged.mid，原文件保留。');
   }
   $('rearrangeHint').textContent = parts.join(' ');
 }
 
 // ------------------------------------------------------------------ 文件选择
 
-function updateStartButton() {
-  const disabled = !state.pending.length || state.uploading ||
-    !state.info || !Object.values(state.info.models || {}).some(Boolean);
+function updateFileBar() {
+  const list = state.pending;
+  $('fileInfo').classList.toggle('empty', !list.length);
+  if (!list.length) {
+    $('fileName').textContent = '还没有选择文件';
+    $('fileSize').textContent = '';
+  } else {
+    const total = list.reduce((sum, file) => sum + file.size, 0);
+    $('fileName').textContent = list.length === 1
+      ? list[0].name : `${list[0].name} 等 ${list.length} 个文件`;
+    $('fileSize').textContent = fmtBytes(total);
+  }
+  const disabled = !list.length || state.uploading || !state.info;
   $('start').disabled = disabled;
-  $('start').textContent = state.pending.length
-    ? `上传并开始（${state.pending.length} 个）` : '上传并开始';
+  $('start').textContent = list.length > 1
+    ? `开始转谱（${list.length} 个）` : '开始转谱';
 }
 
 function setPending(files) {
-  const list = Array.from(files || []);
-  state.pending = list;
-  $('uploadStatus').textContent = list.length
-    ? list.map((file) => file.name).join('、') : '';
-  updateStartButton();
-}
-
-function showUploadProgress(percent, text) {
-  const bar = $('uploadProgress');
-  bar.hidden = false;
-  bar.value = percent;
-  $('uploadStatus').textContent = text;
+  state.pending = Array.from(files || []);
+  $('uploadRow').hidden = true;
+  updateFileBar();
 }
 
 // ------------------------------------------------------------------ 上传
@@ -161,7 +234,7 @@ function uploadOne(file, index, total) {
   return new Promise((resolve, reject) => {
     const form = new FormData();
     form.append('file', file);
-    form.append('model', $('model').value);
+    form.append('model', state.model);
     form.append('rearrange', $('rearrange').checked ? 'true' : 'false');
     form.append('drums', $('drums').checked ? 'true' : 'false');
     form.append('velocity', $('velocity').value || '30');
@@ -175,8 +248,9 @@ function uploadOne(file, index, total) {
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
       const percent = Math.round((100 * event.loaded) / event.total);
-      showUploadProgress(percent,
-        `第 ${index}/${total} 个：${file.name}（${fmtBytes(event.loaded)} / ${fmtBytes(event.total)}）`);
+      $('uploadBar').style.width = `${percent}%`;
+      $('uploadStatus').textContent =
+        `第 ${index}/${total} 个：${file.name}（${fmtBytes(event.loaded)} / ${fmtBytes(event.total)}）`;
     };
     xhr.onload = () => {
       state.xhr = null;
@@ -200,33 +274,164 @@ async function startUploads() {
   const queue = state.pending.slice();
   state.pending = [];
   state.uploading = true;
+  $('start').disabled = true;
+  $('uploadRow').hidden = false;
+  $('uploadBar').style.width = '0%';
   $('abortUpload').hidden = false;
-  $('uploadProgress').hidden = false;
-  updateStartButton();
+  updateFileBar();
 
   const errors = [];
   for (let index = 0; index < queue.length; index += 1) {
-    const file = queue[index];
     try {
-      await uploadOne(file, index + 1, queue.length);
+      await uploadOne(queue[index], index + 1, queue.length);
     } catch (err) {
-      errors.push(`${file.name}：${err.message}`);
+      errors.push(`${queue[index].name}：${err.message}`);
       if (err.message === '已取消上传') break;
     }
   }
 
   state.uploading = false;
   $('abortUpload').hidden = true;
-  $('uploadProgress').hidden = true;
   $('file').value = '';
+  $('uploadBar').style.width = errors.length ? '0%' : '100%';
   $('uploadStatus').textContent = errors.length
     ? errors.join('；')
-    : `已提交 ${queue.length} 个文件。`;
+    : `已提交 ${queue.length} 个文件，下面的任务列表里能看到进度。`;
   await refreshJobs();
-  updateStartButton();
+  updateFileBar();
 }
 
-// ------------------------------------------------------------------ 任务列表
+// ------------------------------------------------------------------ 任务
+
+function metaLine(job) {
+  const parts = [];
+  if (job.percent !== null && job.percent !== undefined) {
+    parts.push(el('span', {}, el('b', { text: `${job.percent}%` })));
+    parts.push(el('span', { class: 'sep' }));
+  }
+  if (job.total) parts.push(el('span', { class: 'num', text: `${job.done} / ${job.total} 片段` }));
+  if (job.started) parts.push(el('span', { class: 'num', text: `已用 ${fmtClock(job.elapsed)}` }));
+  if (job.status === 'running' && job.percent !== null && job.done > 0 && job.total) {
+    const remaining = (job.elapsed / job.done) * (job.total - job.done);
+    parts.push(el('span', { class: 'num', text: `预计还剩 ${fmtClock(remaining)}` }));
+  }
+  return parts;
+}
+
+function renderActive(job) {
+  const card = $('activeCard');
+  if (!job) {
+    card.hidden = true;
+    return;
+  }
+  card.hidden = false;
+  $('activeName').textContent = job.filename;
+  $('activeModel').textContent = job.model;
+  $('activeElapsed').textContent = fmtClock(job.elapsed);
+  $('activeBar').style.width = `${job.percent === null ? 30 : job.percent}%`;
+  $('activeBar').classList.toggle('busy', true);
+  $('activeMeta').replaceChildren(...metaLine(job));
+  $('activeLog').textContent = (job.log || []).join('\n');
+  $('activeCancel').onclick = () => {
+    cancelJob(job.id).catch((err) => alert(err.message));
+  };
+}
+
+function rollSvg(roll) {
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 320 40');
+  svg.setAttribute('class', 'rollsvg');
+  for (const [x, y, w] of roll) {
+    const rect = document.createElementNS(NS, 'rect');
+    rect.setAttribute('x', (x * 320).toFixed(1));
+    rect.setAttribute('y', (2 + (1 - y) * 34).toFixed(1));
+    rect.setAttribute('width', Math.max(1.6, w * 320).toFixed(1));
+    rect.setAttribute('height', '3.6');
+    rect.setAttribute('rx', '1.8');
+    rect.setAttribute('fill', ROLL_COLORS[Math.min(ROLL_COLORS.length - 1, Math.floor(y * ROLL_COLORS.length))]);
+    svg.append(rect);
+  }
+  return svg;
+}
+
+function statusChip(job) {
+  const className = {
+    queued: 'chip wait', running: 'chip run', done: 'chip ok',
+    failed: 'chip bad', cancelled: 'chip',
+  }[job.status] || 'chip';
+  let text = STATUS_TEXT[job.status] || job.status;
+  if (job.status === 'queued' && job.queue_position) {
+    text += ` · 第 ${job.queue_position} 位`;
+  }
+  return el('span', { class: className, text });
+}
+
+function renderJob(job) {
+  const row = el('div', { class: 'qrow' });
+  row.append(el('div', { class: 'line1' },
+    el('span', { class: 'name', text: job.filename }),
+    el('span', { class: 'chip', text: job.model }),
+    statusChip(job),
+  ));
+
+  if (job.status === 'queued') {
+    row.append(el('div', { class: 'bar slim' }, el('i')));
+  }
+
+  if (job.status === 'done' && Array.isArray(job.roll) && job.roll.length) {
+    row.append(rollSvg(job.roll));
+  }
+
+  const info = [];
+  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
+    info.push(el('span', { class: 'num', text: fmtDuration(job.elapsed) }));
+    if (job.notes !== null && job.notes !== undefined) {
+      info.push(el('span', { text: '·' }));
+      info.push(el('span', { class: 'num', text: `${job.notes} 个音符` }));
+    }
+  }
+
+  const acts = [];
+  if (job.raw) {
+    acts.push(el('a', { class: 'btn small', href: `/api/jobs/${job.id}/midi?kind=raw`, download: '' }, '原始 MIDI'));
+  }
+  if (job.rearranged) {
+    acts.push(el('a', { class: 'btn small soft', href: `/api/jobs/${job.id}/midi?kind=rearranged`, download: '' }, '整理版'));
+  }
+  if (job.status === 'queued' || job.status === 'running') {
+    acts.push(el('button', { class: 'btn small ghost', type: 'button', text: '取消', onclick: () => cancelJob(job.id).catch((err) => alert(err.message)) }));
+  } else {
+    acts.push(el('button', { class: 'btn small ghost danger', type: 'button', text: '删除', onclick: () => deleteJob(job.id).catch((err) => alert(err.message)) }));
+  }
+
+  const line2 = el('div', { class: 'line2' }, ...info);
+  if (job.rearrange_detail) {
+    line2.append(el('span', { text: `· ${job.rearrange_detail}` }));
+  }
+  line2.append(el('span', { class: 'acts' }, ...acts));
+  row.append(line2);
+
+  if (job.error) {
+    row.append(el('div', { class: 'error', text: job.error }));
+  }
+  if (job.log && job.log.length) {
+    row.append(el('details', { class: 'log' },
+      el('summary', { text: '日志' }),
+      el('pre', { text: job.log.join('\n') })));
+  }
+  return row;
+}
+
+function renderJobs(jobs) {
+  state.jobs = jobs;
+  const running = jobs.find((job) => job.status === 'running');
+  renderActive(running || null);
+  const rest = jobs.filter((job) => job.status !== 'running');
+  $('jobs').replaceChildren(...rest.map(renderJob));
+  $('emptyJobs').hidden = jobs.length > 0;
+  $('queuePill').textContent = String(jobs.length);
+}
 
 async function cancelJob(id) {
   await api(`/api/jobs/${id}/cancel`, { method: 'POST' });
@@ -236,89 +441,6 @@ async function cancelJob(id) {
 async function deleteJob(id) {
   await api(`/api/jobs/${id}`, { method: 'DELETE' });
   await refreshJobs();
-}
-
-function renderJob(job) {
-  const row = el('div', { class: 'row' },
-    el('strong', { text: job.filename }),
-    el('span', { class: 'pill', text: job.model }),
-    el('span', {
-      class: 'status',
-      dataset: { s: job.status },
-      text: STATUS_TEXT[job.status] || job.status,
-    }),
-    job.queue_position
-      ? el('span', { class: 'muted', text: `第 ${job.queue_position} 位` }) : null,
-  );
-
-  const meta = [];
-  if (job.status === 'running' || job.status === 'done' || job.status === 'cancelled') {
-    meta.push(`耗时 ${fmtDuration(job.elapsed)}`);
-  }
-  if (job.total) meta.push(`片段 ${job.done}/${job.total}`);
-  if (job.notes !== null && job.notes !== undefined) meta.push(`${job.notes} 个音符`);
-
-  const card = el('li', { class: 'job' }, row);
-
-  if (job.status === 'running' || job.status === 'queued') {
-    const bar = el('progress', { max: 100 });
-    if (job.percent !== null) bar.value = job.percent;
-    card.append(bar);
-  }
-  if (meta.length) {
-    card.append(el('div', { class: 'muted', text: meta.join(' · ') }));
-  }
-  if (job.error) {
-    card.append(el('div', { class: 'error', text: job.error }));
-  }
-
-  const actions = [];
-  if (job.raw) {
-    actions.push(el('a', {
-      class: 'link', href: `/api/jobs/${job.id}/midi?kind=raw`,
-      download: '', text: '下载 MIDI',
-    }));
-  }
-  if (job.rearranged) {
-    actions.push(el('a', {
-      class: 'link', href: `/api/jobs/${job.id}/midi?kind=rearranged`,
-      download: '', text: '下载整理版',
-    }));
-  }
-  if (job.status === 'queued' || job.status === 'running') {
-    actions.push(el('button', {
-      class: 'link', text: '取消',
-      onclick: () => cancelJob(job.id).catch((err) => alert(err.message)),
-    }));
-  }
-  if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
-    actions.push(el('button', {
-      class: 'link', text: '删除',
-      onclick: () => deleteJob(job.id).catch((err) => alert(err.message)),
-    }));
-  }
-  if (job.rearrange_detail) {
-    actions.push(el('span', { class: 'muted', text: job.rearrange_detail }));
-  }
-  if (actions.length) card.append(el('div', { class: 'row' }, ...actions));
-
-  if (job.log && job.log.length) {
-    card.append(el('details', { class: 'log' },
-      el('summary', { text: '日志' }),
-      el('pre', { text: job.log.join('\n') }),
-    ));
-  }
-  return card;
-}
-
-function renderJobs(jobs) {
-  state.jobs = jobs;
-  const list = $('jobs');
-  list.replaceChildren(...jobs.map(renderJob));
-  $('emptyJobs').hidden = jobs.length > 0;
-  const active = jobs.filter((job) => job.status === 'running' ||
-    job.status === 'queued').length;
-  $('queuePill').textContent = active ? `${active} 个进行中` : '';
 }
 
 async function refreshJobs() {
@@ -333,6 +455,19 @@ async function refreshJobs() {
 
 // ------------------------------------------------------------------ 启动
 
+function buildEq() {
+  const box = $('eq');
+  if (!box) return;
+  const fragment = document.createDocumentFragment();
+  for (let index = 0; index < 36; index += 1) {
+    const bar = document.createElement('span');
+    bar.style.animationDelay = `${(-index * 0.055).toFixed(2)}s`;
+    bar.style.animationDuration = `${(0.9 + (index % 6) * 0.09).toFixed(2)}s`;
+    fragment.append(bar);
+  }
+  box.replaceChildren(fragment);
+}
+
 function bind() {
   const drop = $('drop');
   const input = $('file');
@@ -344,10 +479,12 @@ function bind() {
       input.click();
     }
   });
-  drop.addEventListener('dragover', (event) => {
-    event.preventDefault();
-    drop.classList.add('over');
-  });
+  for (const type of ['dragenter', 'dragover']) {
+    drop.addEventListener(type, (event) => {
+      event.preventDefault();
+      drop.classList.add('over');
+    });
+  }
   drop.addEventListener('dragleave', () => drop.classList.remove('over'));
   drop.addEventListener('drop', (event) => {
     event.preventDefault();
@@ -358,6 +495,7 @@ function bind() {
 
   $('start').addEventListener('click', () => {
     startUploads().catch((err) => {
+      $('uploadRow').hidden = false;
       $('uploadStatus').textContent = err.message;
     });
   });
@@ -365,11 +503,11 @@ function bind() {
     if (state.xhr) state.xhr.abort();
   });
   $('rearrange').addEventListener('change', updateHint);
-  $('model').addEventListener('change', updateHint);
+  $('theme').addEventListener('click', toggleTheme);
 
-  for (const event of ['dragover', 'drop']) {
-    document.addEventListener(event, (e) => {
-      if (!drop.contains(e.target)) e.preventDefault();
+  for (const type of ['dragover', 'drop']) {
+    document.addEventListener(type, (event) => {
+      if (!drop.contains(event.target)) event.preventDefault();
     });
   }
 
@@ -379,14 +517,20 @@ function bind() {
 }
 
 async function main() {
+  initTheme();
+  buildEq();
+  $('formats').replaceChildren(...FORMATS.map((ext) => el('span', { class: 'fmt', text: ext })));
   bind();
+  updateFileBar();
+  updateHint();
   try {
     const response = await api('/api/info');
     fillInfo(await response.json());
   } catch (err) {
+    $('uploadRow').hidden = false;
     $('uploadStatus').textContent = `无法读取服务信息：${err.message}`;
   }
-  updateStartButton();
+  updateFileBar();
   await refreshJobs();
 }
 

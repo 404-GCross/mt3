@@ -28,11 +28,6 @@ from webui import server as server_module  # noqa: E402
 
 TOKEN = 'selftest-token'
 
-# 一个最小的、mido 能读的 SMF（format 0，1 轨，division 96，只有 end-of-track）。
-MINIMAL_MIDI = (
-    b'MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60'
-    b'MTrk\x00\x00\x00\x04\x00\xff\x2f\x00')
-
 PASSED = []
 
 
@@ -58,6 +53,20 @@ def make_wav(seconds=0.2, rate=16000):
   return buffer.getvalue()
 
 
+def write_fake_midi(path):
+  """两个音符的合法 MIDI：验证下载与钢琴卷预览（不需要模型）。"""
+  import mido
+
+  mid = mido.MidiFile(type=0, ticks_per_beat=96)
+  track = mido.MidiTrack()
+  mid.tracks.append(track)
+  track.append(mido.Message('note_on', note=60, velocity=80, time=0))
+  track.append(mido.Message('note_on', note=64, velocity=80, time=48))
+  track.append(mido.Message('note_off', note=60, velocity=0, time=48))
+  track.append(mido.Message('note_off', note=64, velocity=0, time=48))
+  mid.save(str(path))
+
+
 def make_runner(delay=0.02, fail=False):
   """假 runner：把进度推完，写一个能下载的最小 MIDI。"""
 
@@ -71,9 +80,10 @@ def make_runner(delay=0.02, fail=False):
     if fail:
       raise RuntimeError('假失败')
     raw = job.directory / 'out.mid'
-    raw.write_bytes(MINIMAL_MIDI)
+    write_fake_midi(raw)
     job.raw_path = raw
-    job.notes = 1
+    job.notes = 2
+    job.roll = jobs_module.midi_roll(raw)
     if job.rearrange:
       import midi_rearrange
       result = midi_rearrange.rearrange_file(
@@ -211,6 +221,13 @@ def test_job_flow():
   job = wait_for(client, job_id)
   check('任务完成', job['status'] == 'done', str(job))
   check('进度到 100%', job['percent'] == 100)
+
+  check('任务带钢琴卷预览',
+        isinstance(job['roll'], list) and len(job['roll']) == 2,
+        str(job.get('roll')))
+  check('钢琴卷坐标都在 0..1',
+        all(0 <= value <= 1 for item in (job['roll'] or []) for value in item),
+        str(job.get('roll')))
 
   raw = client.get('/api/jobs/{}/midi?kind=raw'.format(job_id))
   check('下载原始 MIDI', raw.status_code == 200 and len(raw.content) > 0)

@@ -62,6 +62,8 @@ class Job:
   rearranged_path: Optional[Path] = None
   rearrange_detail: Optional[str] = None
   notes: Optional[int] = None
+  # 给页面画钢琴卷用的预览：[[x, y, w], ...]，都是 0..1（见 midi_roll）。
+  roll: Optional[list] = None
   created: float = field(default_factory=time.time)
   started: Optional[float] = None
   finished: Optional[float] = None
@@ -103,6 +105,7 @@ class Job:
         'rearranged': bool(
             self.rearranged_path and Path(self.rearranged_path).exists()),
         'rearrange_detail': self.rearrange_detail,
+        'roll': self.roll,
         'queue_position': queue_position,
         'log': list(self.log_lines)[-20:],
     }
@@ -292,6 +295,50 @@ class JobManager:
       shutil.rmtree(item.directory, ignore_errors=True)
 
 
+def midi_roll(path, max_notes=400):
+  """把 MIDI 压成给页面画钢琴卷的小数组：``[[x, y, w], ...]``，都是 0..1。
+
+  x = 起点 / 总时长，y = 音高（21..108 归一到 0..1），w = 时值 / 总时长。
+  纯预览用：解析失败或没有音符就返回空列表。
+  """
+  try:
+    import mido
+    mid = mido.MidiFile(str(path))
+  except Exception:  # noqa: BLE001 - 预览而已，失败就不画
+    return []
+
+  notes = []
+  for track in mid.tracks:
+    tick = 0
+    active = {}
+    for message in track:
+      tick += message.time
+      if message.type == 'note_on' and message.velocity > 0:
+        active[(message.channel, message.note)] = tick
+      elif message.type in ('note_off', 'note_on'):
+        start = active.pop((message.channel, message.note), None)
+        if start is not None and tick > start:
+          notes.append((start, tick, message.note))
+  if not notes:
+    return []
+
+  end = max(item[1] for item in notes)
+  if end <= 0:
+    return []
+  if len(notes) > max_notes:
+    step = len(notes) / float(max_notes)
+    notes = [notes[int(index * step)] for index in range(max_notes)]
+
+  roll = []
+  for start, stop, pitch in notes:
+    roll.append([
+        round(start / end, 3),
+        round(max(0.0, min(1.0, (pitch - 21) / 87.0)), 3),
+        round(max(0.002, min(1.0, (stop - start) / end)), 3),
+    ])
+  return roll
+
+
 def make_runner(config):
   """返回真正跑模型的 runner；``backend`` 在这里才导入（自检不需要它）。"""
 
@@ -330,6 +377,7 @@ def make_runner(config):
     backend.save_midi(note_sequence, raw)
     job.raw_path = raw
     job.notes = len(note_sequence.notes)
+    job.roll = midi_roll(raw)
     job.log('原始 MIDI: {}（{} 个音符）'.format(raw.name, job.notes))
 
     if job.rearrange:
