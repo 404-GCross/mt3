@@ -428,8 +428,9 @@ download_asset() {  # 资产文件名
 
   local prefix ok=0
   for prefix in "${order[@]}"; do
-    if curl -fL --retry 2 --progress-bar -o "${WORK}/dist/${name}" \
-      "${prefix}${url}"; then
+    # --connect-timeout：直连被墙时别干等 curl 默认的几分钟才换源。
+    if curl -fL --connect-timeout 15 --retry 2 --progress-bar \
+      -o "${WORK}/dist/${name}" "${prefix}${url}"; then
       ok=1
       break
     fi
