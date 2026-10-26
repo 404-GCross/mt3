@@ -57,8 +57,9 @@ jobs:
           grep -q 'mt3-transcriber-0.0.0-arm64.dmg' /tmp/install-macos.txt
 
           # 显式 --mirror：不测速，URL 直接用给定前缀。
+          # 故意不给结尾斜杠，验证前缀会被补成 .../https://github.com/...
           MT3_TEST_OS=Linux MT3_TEST_DISTRO=fedora MT3_TEST_ARCH=x86_64 \
-            bash packaging/install.sh --dry-run --mirror https://gh-proxy.com/ \
+            bash packaging/install.sh --dry-run --mirror https://gh-proxy.com \
             --version 0.0.0 | tee /tmp/install-mirror.txt
           grep -q 'https://gh-proxy.com/https://github.com/404-GCross/mt3/releases' \
             /tmp/install-mirror.txt

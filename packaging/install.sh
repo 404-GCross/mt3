@@ -407,14 +407,14 @@ build_candidates() {  # 填 CANDIDATES（每项是 "标签|前缀"）
 
   if [ -n "$MIRROR" ]; then
     # --mirror / MT3_MIRROR：单个，显式，不测速；直连留作兜底。
-    CANDIDATES=("自定义|${MIRROR%/}" "GitHub 直连|")
+    CANDIDATES=("自定义|${MIRROR%/}/" "GitHub 直连|")
     return 0
   fi
 
   if [ -n "$MIRRORS" ]; then
     raw="$(printf '%s' "$MIRRORS" | tr ',' ' ')"
     for item in $raw; do
-      prefix="${item%/}"
+      prefix="${item%/}/"
       case "$prefix" in
         http://* | https://*) ;;
         *)
@@ -490,7 +490,7 @@ select_source() {  # 资产 URL -> 设置 CHOSEN_PREFIX
     local typed=""
     read -r typed </dev/tty || true
     if [ -n "$typed" ]; then
-      CHOSEN_PREFIX="${typed%/}"
+      CHOSEN_PREFIX="${typed%/}/"
       say "使用你填的源：${CHOSEN_PREFIX}"
       return 0
     fi
