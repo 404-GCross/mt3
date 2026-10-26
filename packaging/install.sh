@@ -27,6 +27,7 @@ UNINSTALL=0
 FORCE_MODE=""
 CUDA=""
 MIRROR="${MT3_MIRROR:-}"
+MIRRORS="${MT3_MIRRORS:-}"
 NO_PROBE=0
 INSTALL_PATH=""
 
@@ -51,14 +52,22 @@ MT3 Transcriber 一键安装（Linux x86_64 / macOS Apple Silicon）
   --file PATH        安装本地包（.deb / .rpm / .AppImage / .dmg），不下载
   --appimage         Linux 上强制用免 root 的 AppImage
   --cuda WHICH       cpu | cuda12 | cuda13（默认不装，只打印命令）
-  --mirror URL       下载前缀，例如 https://gh-proxy.com/（显式指定，不测速）
+  --mirror URL       下载前缀，例如 https://gh-proxy.com/（单个，显式指定，不测速）
   --no-probe         不测速，直接用 GitHub 直连
   --dry-run          只打印会做什么，不下载、不安装
   --yes, -y          不询问（非交互环境本来就不问）
   --uninstall        卸载（保留用户数据）
   -h, --help         看这个
 
-环境变量：MT3_MIRROR 等价于 --mirror。
+环境变量：
+  MT3_MIRROR    单个镜像前缀，等价于 --mirror（不测速）
+  MT3_MIRRORS   多个前缀，逗号分隔，会一起测速，例如
+                MT3_MIRRORS="https://a.example/,https://b.example/"
+
+也可以把它们写进 ~/.config/mt3-transcriber/mirror.conf（MT3_MIRRORS 或
+MT3_GH_PROXY，和 install_cuda_jax.sh 共用同一个文件）。
+
+下载源都连不上、而你是在终端里跑的时候，脚本会直接问你要不要填一个。
 EOF
 }
 
@@ -181,6 +190,22 @@ case "$CUDA" in
   *) die "--cuda 只能是 cpu / cuda12 / cuda13" ;;
 esac
 
+load_mirror_conf() {
+  local conf="${XDG_CONFIG_HOME:-$HOME/.config}/mt3-transcriber/mirror.conf"
+  [ -f "$conf" ] || return 0
+  [ -n "$MIRROR" ] && return 0
+  [ -n "$MIRRORS" ] && return 0
+  local from_conf=""
+  # 在子 shell 里读，避免配置文件改到本脚本的变量。
+  # 兼容 install_cuda_jax.sh 用的 MT3_GH_PROXY，也支持多条 MT3_MIRRORS。
+  from_conf="$(. "$conf" >/dev/null 2>&1
+               printf '%s' "${MT3_MIRRORS:-${MT3_GH_PROXY:-}}")"
+  if [ -n "$from_conf" ]; then
+    MIRRORS="$from_conf"
+    say "镜像配置：${conf}"
+  fi
+}
+
 # ------------------------------------------------------------------ 检测
 
 step "检查系统"
@@ -192,11 +217,7 @@ if [ "$OS" = macos ]; then
 fi
 
 SUDO=""
-if [ "$(id -u)" -ne 0 ]; then
-  SUDO="sudo"
-else
-  warn "当前是 root，安装会直接写系统目录。"
-fi
+SUDO_KEEPALIVE=""
 
 if [ -n "$LOCAL_FILE" ]; then
   [ -f "$LOCAL_FILE" ] || die "文件不存在：${LOCAL_FILE}"
@@ -228,6 +249,48 @@ fi
 
 say "系统：${OS} / ${ARCH}（${DISTRO}）"
 say "方式：${MODE}"
+
+need_root() {
+  case "$MODE" in
+    deb | rpm) [ "$(id -u)" -ne 0 ] ;;
+    *) return 1 ;;
+  esac
+}
+
+ensure_root_access() {
+  if [ "$(id -u)" -eq 0 ]; then
+    SUDO=""
+    warn "当前是 root，安装会直接写系统目录。"
+    return 0
+  fi
+  SUDO=""
+  need_root || return 0
+
+  SUDO="sudo"
+  command -v sudo >/dev/null 2>&1 \
+    || die "装 .${MODE} 需要 root，但系统里没有 sudo。用 root 跑，或改用 --appimage。"
+  if [ "$DRY_RUN" = 1 ]; then
+    say "（dry-run）真跑时会在下载之前先要一次 sudo 密码。"
+    return 0
+  fi
+
+  # 一开始就要密码：用户可能把安装挂后台，等到安装那一刻再问会卡住。
+  say "需要管理员权限安装系统包：先确认一次密码，之后不再打断。"
+  if ! sudo -v; then
+    die "没有拿到 sudo 权限（挂后台时 sudo 也没法问密码）。已中止，什么都没改。
+       也可以先 sudo -v，或者用 --appimage 免 root 安装。"
+  fi
+  # sudo 默认 5 分钟就过期；1GB 的包下载+安装可能更久，定期续期，
+  # 免得到安装那一步又弹出密码提示。
+  (
+    while sleep 50; do
+      sudo -n true 2>/dev/null || exit 0
+    done
+  ) &
+  SUDO_KEEPALIVE=$!
+}
+
+ensure_root_access
 
 # ------------------------------------------------------------------ 卸载
 
@@ -338,27 +401,64 @@ probe_speed() {  # URL -> bytes/s（0 = 不可用/太慢）
   esac
 }
 
+build_candidates() {  # 填 CANDIDATES（每项是 "标签|前缀"）
+  local raw="" item prefix index=0
+  CANDIDATES=()
+
+  if [ -n "$MIRROR" ]; then
+    # --mirror / MT3_MIRROR：单个，显式，不测速；直连留作兜底。
+    CANDIDATES=("自定义|${MIRROR%/}" "GitHub 直连|")
+    return 0
+  fi
+
+  if [ -n "$MIRRORS" ]; then
+    raw="$(printf '%s' "$MIRRORS" | tr ',' ' ')"
+    for item in $raw; do
+      prefix="${item%/}"
+      case "$prefix" in
+        http://* | https://*) ;;
+        *)
+          warn "忽略不是 http(s) 的镜像：${item}"
+          continue
+          ;;
+      esac
+      index=$((index + 1))
+      CANDIDATES+=("自定义${index}|${prefix}")
+      if [ "$index" -ge 5 ]; then
+        warn "一次最多测 5 个自定义镜像，其余忽略。"
+        break
+      fi
+    done
+    # 自定义源之外，直连永远留一条兜底。
+    CANDIDATES+=("GitHub 直连|")
+    return 0
+  fi
+
+  # 没配置就用内置的两个：直连 + 文档里的 gh-proxy。
+  CANDIDATES=("GitHub 直连|" "gh-proxy|https://gh-proxy.com/")
+}
+
 select_source() {  # 资产 URL -> 设置 CHOSEN_PREFIX
   local url="$1"
   CHOSEN_PREFIX=""
+  build_candidates
 
   if [ -n "$MIRROR" ]; then
-    CHOSEN_PREFIX="$MIRROR"
-    say "下载源：${MIRROR}（--mirror，不测速）"
+    CHOSEN_PREFIX="${CANDIDATES[0]#*|}"
+    say "下载源：${CHOSEN_PREFIX}（--mirror，不测速）"
     return 0
   fi
   if [ "$NO_PROBE" = 1 ]; then
+    CHOSEN_PREFIX=""
     say "下载源：GitHub 直连（--no-probe）"
     return 0
   fi
 
-  # 只放两个：直连 + 文档里的 gh-proxy。第三方镜像寿命不稳，不内置。
-  local candidates=("GitHub 直连|" "gh-proxy|https://gh-proxy.com/")
   local best_prefix="" best_speed=0
   local item label prefix speed
 
   say "测速（各取 256 KB）："
-  for item in "${candidates[@]}"; do
+  for item in "${CANDIDATES[@]}"; do
     label="${item%%|*}"
     prefix="${item#*|}"
     speed="$(probe_speed "${prefix}${url}")"
@@ -374,18 +474,32 @@ select_source() {  # 资产 URL -> 设置 CHOSEN_PREFIX
     fi
   done
 
-  if ! awk -v value="$best_speed" 'BEGIN { exit !(value > 0) }'; then
-    # 测速只是参考：都测不出来时先用直连，下载阶段失败会自动换镜像。
-    CHOSEN_PREFIX=""
-    warn "测速没有结果（网络慢或被挡）；先用直连，失败会自动换镜像。"
+  if awk -v value="$best_speed" 'BEGIN { exit !(value > 0) }'; then
+    CHOSEN_PREFIX="$best_prefix"
+    if [ -z "$best_prefix" ]; then
+      say "选中最快：GitHub 直连（$(format_speed "$best_speed")）"
+    else
+      say "选中最快：${best_prefix}（$(format_speed "$best_speed")）"
+    fi
     return 0
   fi
-  CHOSEN_PREFIX="$best_prefix"
-  if [ -z "$best_prefix" ]; then
-    say "选中最快：GitHub 直连（$(format_speed "$best_speed")）"
-  else
-    say "选中最快：gh-proxy（$(format_speed "$best_speed")）"
+
+  # 都测不出来：在终端里跑就直接问一句，让用户自己填镜像。
+  if [ -c /dev/tty ] && { : >/dev/tty; } 2>/dev/null; then
+    printf '       都连不上。还有别的镜像前缀吗？（直接回车放弃）: ' >/dev/tty
+    local typed=""
+    read -r typed </dev/tty || true
+    if [ -n "$typed" ]; then
+      CHOSEN_PREFIX="${typed%/}"
+      say "使用你填的源：${CHOSEN_PREFIX}"
+      return 0
+    fi
   fi
+
+  # 测速只是参考：都测不出来时先用直连，下载阶段失败会自动换镜像。
+  CHOSEN_PREFIX=""
+  warn "测速没有结果（网络慢或被挡）；先用直连，失败会自动换镜像。"
+  warn "也可以自己指定：--mirror https://your-mirror/ 或 MT3_MIRRORS=\"a/,b/\"。"
 }
 
 verify_checksum() {  # 资产文件名
@@ -418,13 +532,16 @@ download_asset() {  # 资产文件名
   fi
 
   mkdir -p "${WORK}/dist"
-  # 首选失败就换另一个源（直连 <-> 镜像）重试一次。
+  # 首选失败就按候选顺序换下一个源重试。
   local order=("$CHOSEN_PREFIX")
-  if [ -z "$CHOSEN_PREFIX" ]; then
-    order+=("https://gh-proxy.com/")
-  else
-    order+=("")
-  fi
+  local item prefix
+  for item in "${CANDIDATES[@]}"; do
+    prefix="${item#*|}"
+    if [ "$prefix" = "$CHOSEN_PREFIX" ]; then
+      continue
+    fi
+    order+=("$prefix")
+  done
 
   local prefix ok=0
   for prefix in "${order[@]}"; do
@@ -443,12 +560,17 @@ download_asset() {  # 资产文件名
 
 WORK=""
 cleanup() {
+  if [ -n "$SUDO_KEEPALIVE" ]; then
+    kill "$SUDO_KEEPALIVE" 2>/dev/null || true
+  fi
   if [ -n "$WORK" ]; then
     rm -rf "$WORK"
   fi
 }
 trap cleanup EXIT
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/mt3-install.XXXXXX")"
+
+load_mirror_conf
 
 step "确定版本"
 if [ -n "$LOCAL_FILE" ]; then

@@ -24,6 +24,12 @@ Gatekeeper 弹窗）。下载和 SHA256 校验都在普通用户下完成，只�
 - 想先看脚本再跑：`curl -fsSLO <同一个 URL> && less install.sh && bash install.sh`
 - **自动选源**：先对「GitHub 直连」和 `gh-proxy` 各取样 256 KB 测速，用快的那个；
   下载失败会自动换另一个。`--mirror URL` 显式指定时不再测速，`--no-probe` 则直接用直连。
+- **自己填镜像**：`--mirror URL`（单个、不测速）、`MT3_MIRRORS="https://a/,https://b/"`
+  （多个，逗号分隔，会一起测速）、或写进 `~/.config/mt3-transcriber/mirror.conf`
+  （`MT3_MIRRORS=...` 或 `MT3_GH_PROXY=...`，和 `install_cuda_jax.sh` 共用同一个文件）。
+  都连不上、而且你是在终端里跑的时候，脚本会直接问你要不要填一个。
+- **sudo 在下载之前就要**：确定要装 deb/rpm 后立刻 `sudo -v`，并每 50 秒续期，
+  所以把安装挂后台也不会卡在密码提示上；没有终端时直接中止，不会静默干等。
 - **校验和优先直连 GitHub**（哪怕包是从镜像下的）：直连不通才退回镜像，并打印
   「校验和来自镜像，无法独立验证」；对不上直接中止。
 - GitHub 完全不通时版本号也拿不到：加 `--version 0.3.3` 跳过解析
