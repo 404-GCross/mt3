@@ -114,7 +114,9 @@ mt3-transcriber --web --lan        # deb/rpm 装好之后（也有「MT3 转谱�
   启动后不能切换，要换设备就重启服务。
 - GPU 上默认只缓存一个模型（`--keep-models 1`），避免两个模型同时占显存。
 - 页面上可以对每个任务单独选模型、是否做后处理以及四个阈值；支持多文件排队、取消，
-  下载原始 MIDI 与 `.rearranged.mid`。
+  下载原始 MIDI 与 `.rearranged.mid`。「开始转谱」在选项卡片底部（改完参数直接点）。
+- 完成的任务可以**重新转谱**：复用服务器上已上传的音频（硬链接，不复制），
+  按当前选项再跑一遍，不用重新上传。
 - AppImage 没有桌面图标，直接 `./mt3-transcriber-*.AppImage --web --lan`。
 - macOS：`open -a "/Applications/MT3 Transcriber.app" --args --web --lan`，
   地址与令牌会打在 `~/Library/Logs/mt3-transcriber.log` 里（`tail -f` 那个文件）。

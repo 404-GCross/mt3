@@ -400,6 +400,52 @@ def create_app(config: WebConfig, manager=None) -> FastAPI:
         stream(), media_type='text/event-stream',
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
+  @app.post('/api/jobs/{job_id}/retry', status_code=202,
+            dependencies=[Depends(check_token)])
+  def retry_job(
+      job_id: str,
+      model: str = 'mt3',
+      rearrange: str = 'false',
+      drums: str = 'false',
+      velocity: int = 30,
+      min_ms: int = 30,
+      chord_ms: int = 60,
+      repeat_ms: int = 120,
+  ):
+    """用同一个已上传的文件、按新参数再转一遍（不用重新上传）。"""
+    if model not in MODEL_TYPES:
+      raise HTTPException(400, '未知模型：{}'.format(model))
+    if not (Path(config.checkpoint_dir) / model / 'checkpoint').exists():
+      raise HTTPException(
+          409, '服务器上没有 {} 的模型权重。'.format(model))
+    if manager.queued_count() >= config.queue_limit:
+      raise HTTPException(
+          429, '队列已满（{} 个等待中），稍后再试。'.format(config.queue_limit))
+
+    params = None
+    if truthy(rearrange):
+      params = {
+          'velocity': max(0, min(127, int(velocity))),
+          'min_ms': max(0, int(min_ms)),
+          'chord_ms': max(0, int(chord_ms)),
+          'repeat_ms': max(0, int(repeat_ms)),
+          'drums': truthy(drums),
+      }
+
+    try:
+      snapshot = manager.clone_for_retry(job_id, model, params)
+    except KeyError as exc:
+      raise HTTPException(404, '任务不存在（可能已被清理）。') from exc
+    except FileNotFoundError as exc:
+      raise HTTPException(409, str(exc)) from exc
+    except jobs_module.QueueFull as exc:
+      raise HTTPException(429, str(exc)) from exc
+    return {
+        'id': snapshot['id'],
+        'status': snapshot['status'],
+        'queue_position': snapshot['queue_position'],
+    }
+
   @app.post('/api/jobs/{job_id}/cancel', dependencies=[Depends(check_token)])
   def cancel_job(job_id: str):
     job = manager.cancel(job_id)

@@ -255,6 +255,42 @@ def test_job_flow():
         client.get('/api/jobs/{}'.format(job_id)).status_code == 404)
 
 
+def test_retry():
+  client, manager = make_client()
+  first = upload(client, name='retry.wav',
+                 extra={'model': 'ismir2021', 'rearrange': 'true'}).json()['id']
+  check('首次任务完成', wait_for(client, first)['status'] == 'done')
+
+  response = client.post('/api/jobs/{}/retry'.format(first), params={
+      'model': 'mt3', 'rearrange': 'false', 'drums': 'false',
+      'velocity': '30', 'min_ms': '30', 'chord_ms': '60', 'repeat_ms': '120'})
+  check('重新转谱返回 202', response.status_code == 202, response.text)
+  second = response.json()['id']
+  check('重新转谱是新任务', second != first)
+
+  job = wait_for(client, second)
+  check('新任务完成', job['status'] == 'done', str(job))
+  check('新任务沿用文件名', job['filename'] == 'retry.wav', str(job['filename']))
+  check('新任务换了模型', job['model'] == 'mt3')
+  check('新任务没有整理版', job['rearranged'] is False)
+
+  first_input = manager._jobs[first].input_path
+  second_input = manager._jobs[second].input_path
+  check('输入文件是硬链接复用的（没重新上传、没复制）',
+        first_input.stat().st_ino == second_input.stat().st_ino)
+
+  check('原任务还能下载',
+        client.get('/api/jobs/{}/midi?kind=raw'.format(first)).status_code == 200)
+  client.delete('/api/jobs/{}'.format(first))
+  check('删掉原任务不影响新任务的输入', second_input.exists())
+
+  second_input.unlink()
+  missing = client.post('/api/jobs/{}/retry'.format(second))
+  check('输入被清理后 retry 返回 409', missing.status_code == 409, missing.text)
+  check('未知任务 retry 返回 404',
+        client.post('/api/jobs/none/retry').status_code == 404)
+
+
 def test_cancel():
   client, _ = make_client(runner=make_runner(delay=0.4))
   response = upload(client)
@@ -321,7 +357,7 @@ def test_csrf():
 
 def main():
   print('WebUI 接口自检')
-  for test in (test_auth, test_limits, test_job_flow, test_cancel,
+  for test in (test_auth, test_limits, test_job_flow, test_retry, test_cancel,
                test_queue_full, test_failure, test_csrf):
     print('- {}'.format(test.__name__))
     test()

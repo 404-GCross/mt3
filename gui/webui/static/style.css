@@ -310,6 +310,22 @@ body {
 
 .btn.danger { color: var(--err); }
 
+.btn.wide { width: 100%; justify-content: center; }
+
+.startbox {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 8px;
+}
+
+.startbox .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---------------------------------------------------------------- 上传进度 */
 
 .uploadrow { display: grid; gap: 6px; margin-top: 10px; }

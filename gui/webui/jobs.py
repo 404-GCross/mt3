@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import collections
+import os
 import queue
 import shutil
 import threading
@@ -181,6 +182,45 @@ class JobManager:
       if job is None:
         return None
       return job.raw_path if kind == 'raw' else job.rearranged_path
+
+  def clone_for_retry(self, job_id, model, rearrange):
+    """用同一个输入文件再跑一遍（硬链接复用，不复制、不重新上传）。
+
+    Returns:
+      新任务的快照（``JobManager.submit`` 的返回值）。
+
+    Raises:
+      KeyError: 原任务不存在。
+      FileNotFoundError: 输入文件已经被清理。
+      QueueFull: 队列满。
+    """
+    with self._lock:
+      source = self._jobs.get(job_id)
+      if source is None:
+        raise KeyError(job_id)
+      input_path = Path(source.input_path)
+      filename = source.filename
+
+    if not input_path.exists():
+      raise FileNotFoundError(
+          '输入文件已被清理（超过保留时间），请重新上传。')
+
+    new_id, directory = self.new_directory()
+    target = directory / ('input' + input_path.suffix)
+    try:
+      # 硬链接：同一个 inode，删掉任何一个任务都不影响另一个。
+      os.link(input_path, target)
+    except OSError:
+      shutil.copyfile(input_path, target)
+
+    job = Job(id=new_id, filename=filename, model=model, directory=directory,
+              input_path=target, rearrange=rearrange)
+    job.log('从 {} 重新转谱（复用已上传的文件）'.format(job_id))
+    try:
+      return self.submit(job)
+    except BaseException:
+      self.discard(new_id)
+      raise
 
   def queued_count(self):
     with self._lock:

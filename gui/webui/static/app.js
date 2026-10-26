@@ -65,6 +65,11 @@ function fmtDuration(seconds) {
   return `${Math.floor(minutes / 60)} 时 ${minutes % 60} 分`;
 }
 
+function fmtTime(seconds) {
+  const date = new Date((seconds || 0) * 1000);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
 function fmtClock(seconds) {
   const total = Math.max(0, Math.round(seconds || 0));
   const m = String(Math.floor(total / 60)).padStart(2, '0');
@@ -83,6 +88,24 @@ function errorMessage(xhr) {
     // 不是 JSON：退回状态码。
   }
   return `HTTP ${xhr.status}${xhr.status === 401 ? '（令牌失效，请重新用带 ?t= 的链接打开）' : ''}`;
+}
+
+async function apiJson(response) {
+  let body = null;
+  try {
+    body = await response.json();
+  } catch (err) {
+    // 不是 JSON（很少见）。
+  }
+  if (!response.ok) {
+    const detail = body && body.detail;
+    if (typeof detail === 'string') throw new Error(detail);
+    if (Array.isArray(detail)) {
+      throw new Error(detail.map((item) => item.msg || JSON.stringify(item)).join('；'));
+    }
+    throw new Error(`HTTP ${response.status}`);
+  }
+  return body;
 }
 
 async function api(path, options) {
@@ -210,11 +233,15 @@ function updateFileBar() {
   if (!list.length) {
     $('fileName').textContent = '还没有选择文件';
     $('fileSize').textContent = '';
+    $('selectedInfo').textContent = '还没有选择文件';
   } else {
     const total = list.reduce((sum, file) => sum + file.size, 0);
     $('fileName').textContent = list.length === 1
       ? list[0].name : `${list[0].name} 等 ${list.length} 个文件`;
     $('fileSize').textContent = fmtBytes(total);
+    $('selectedInfo').textContent = list.length === 1
+      ? `将转谱：${list[0].name} · ${fmtBytes(total)}`
+      : `将转谱：${list.length} 个文件 · ${fmtBytes(total)}`;
   }
   const disabled = !list.length || state.uploading || !state.info;
   $('start').disabled = disabled;
@@ -384,6 +411,9 @@ function renderJob(job) {
   }
 
   const info = [];
+  if (job.created) {
+    info.push(el('span', { class: 'num', text: fmtTime(job.created) }));
+  }
   if (job.status === 'done' || job.status === 'failed' || job.status === 'cancelled') {
     info.push(el('span', { class: 'num', text: fmtDuration(job.elapsed) }));
     if (job.notes !== null && job.notes !== undefined) {
@@ -402,6 +432,13 @@ function renderJob(job) {
   if (job.status === 'queued' || job.status === 'running') {
     acts.push(el('button', { class: 'btn small ghost', type: 'button', text: '取消', onclick: () => cancelJob(job.id).catch((err) => alert(err.message)) }));
   } else {
+    acts.push(el('button', {
+      class: 'btn small',
+      type: 'button',
+      text: '重新转谱',
+      title: '用当前「转谱选项」再跑一遍，不用重新上传',
+      onclick: () => retryJob(job.id).catch((err) => alert(err.message)),
+    }));
     acts.push(el('button', { class: 'btn small ghost danger', type: 'button', text: '删除', onclick: () => deleteJob(job.id).catch((err) => alert(err.message)) }));
   }
 
@@ -431,6 +468,21 @@ function renderJobs(jobs) {
   $('jobs').replaceChildren(...rest.map(renderJob));
   $('emptyJobs').hidden = jobs.length > 0;
   $('queuePill').textContent = String(jobs.length);
+}
+
+async function retryJob(id) {
+  // 用同一个已上传的文件 + 当前「转谱选项」再跑一遍，不用重新上传。
+  const query = new URLSearchParams({
+    model: state.model,
+    rearrange: $('rearrange').checked ? 'true' : 'false',
+    drums: $('drums').checked ? 'true' : 'false',
+    velocity: $('velocity').value || '30',
+    min_ms: $('minMs').value || '30',
+    chord_ms: $('chordMs').value || '60',
+    repeat_ms: $('repeatMs').value || '120',
+  });
+  await apiJson(await api(`/api/jobs/${id}/retry?${query}`, { method: 'POST' }));
+  await refreshJobs();
 }
 
 async function cancelJob(id) {

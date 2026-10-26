@@ -44,14 +44,7 @@
               <span class="name" id="fileName">还没有选择文件</span>
               <span class="size num" id="fileSize"></span>
             </div>
-            <button class="btn primary" id="start" disabled>开始转谱</button>
           </div>
-
-          <div class="uploadrow" id="uploadRow" hidden>
-            <div class="bar slim"><i id="uploadBar"></i></div>
-            <span class="meta" id="uploadStatus"></span>
-          </div>
-          <button class="btn ghost small" id="abortUpload" hidden>取消上传</button>
         </section>
 
         <section class="card">
@@ -83,6 +76,16 @@
           </div>
           <label class="check"><input type="checkbox" id="drums"> 连打击乐通道一起整理</label>
           <p class="hint" id="rearrangeHint"></p>
+
+          <div class="startbox">
+            <span class="muted" id="selectedInfo">还没有选择文件</span>
+            <button class="btn primary wide" id="start" disabled>开始转谱</button>
+            <div class="uploadrow" id="uploadRow" hidden>
+              <div class="bar slim"><i id="uploadBar"></i></div>
+              <span class="meta" id="uploadStatus"></span>
+            </div>
+            <button class="btn ghost small" id="abortUpload" hidden>取消上传</button>
+          </div>
         </section>
       </div>
 
